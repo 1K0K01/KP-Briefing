@@ -522,6 +522,13 @@ const PROVIDER_DEFAULT_MODEL = {
   custom: ''
 };
 
+// 히스토리/결과 화면에 쓸 "공급자 · 모델명" 표시 문자열
+function formatProviderTag(record){
+  const label = PROVIDER_LABELS[record.provider] || record.provider || '';
+  if (record.model) return `${label} · ${record.model}`;
+  return label;
+}
+
 const DEFAULT_SYSTEM_PROMPT = `당신은 크툴루의 부름(Call of Cthulhu) 7판 경험이 풍부한 마스터링 조언가입니다.
 주어진 시나리오 본문을 분석해서, 이 시나리오를 처음 진행하는 키퍼(GM)가 세션 전에 읽을 "사전 브리핑"을 작성합니다.
 
@@ -640,7 +647,7 @@ async function refreshHistory(){
     if (currentDoc && currentDoc.id === item.id) li.classList.add('active');
     const isScript = item.type === 'script';
     const typeIcon = isScript ? '✂️' : '📋';
-    const subLabel = isScript ? `${item.kpcName||'KPC'} / ${item.pcName||'PC'}` : (PROVIDER_LABELS[item.provider] || '');
+    const subLabel = isScript ? `${item.kpcName||'KPC'} / ${item.pcName||'PC'}` : formatProviderTag(item);
     li.innerHTML = `<span class="doc-title-wrap"><span class="doc-title">${typeIcon} ${escapeHtml(item.title)}</span><span class="doc-provider">${escapeHtml(subLabel)}</span></span><span class="doc-del" onclick="event.stopPropagation(); deleteAnalysis('${item.id}')">✕</span>`;
     li.onclick = () => loadAnalysis(item.id);
     list.appendChild(li);
@@ -982,6 +989,7 @@ async function runAnalysis(){
       type: 'briefing',
       title,
       provider,
+      model: cfg.model || PROVIDER_DEFAULT_MODEL[provider] || '',
       createdAt: Date.now(),
       rawText
     };
@@ -1232,7 +1240,7 @@ function renderResultView(record){
     <div class="result-header">
       <div>
         <div class="result-title">${escapeHtml(record.title)}</div>
-        <div class="result-provider-tag">${escapeHtml(PROVIDER_LABELS[record.provider] || '')}</div>
+        <div class="result-provider-tag">${escapeHtml(formatProviderTag(record))}</div>
       </div>
       <div class="result-actions">
         <button class="ghost-btn" onclick="copyResultAsText()">텍스트로 복사</button>
@@ -1263,7 +1271,7 @@ function toggleFolio(id){
 
 function copyResultAsText(){
   if (!currentDoc) return;
-  const out = `■ ${currentDoc.title}\n(${PROVIDER_LABELS[currentDoc.provider]||''})\n\n${currentDoc.rawText}`;
+  const out = `■ ${currentDoc.title}\n(${formatProviderTag(currentDoc)})\n\n${currentDoc.rawText}`;
   navigator.clipboard.writeText(out).then(() => showToast('클립보드에 복사되었습니다'));
 }
 
