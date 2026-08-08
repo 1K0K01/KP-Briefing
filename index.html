@@ -947,6 +947,9 @@ async function handlePdfUpload(e){
 /* ============================================================
    분석 실행
 ============================================================ */
+let currentAnalysisAbort = null;
+let loadingTimerInterval = null;
+
 async function runAnalysis(){
   const provider = localStorage.getItem('kb_active_provider') || 'anthropic';
   const cfg = providersState[provider] || {};
@@ -968,10 +971,12 @@ async function runAnalysis(){
   const MAX_CHARS = 180000;
   if (text.length > MAX_CHARS) text = text.slice(0, MAX_CHARS);
 
-  renderLoadingView(provider);
+  const displayName = (provider === 'custom' && cfg.model) ? cfg.model : PROVIDER_LABELS[provider];
+  renderLoadingView(displayName);
 
+  currentAnalysisAbort = new AbortController();
   try {
-    const rawText = await callAI(provider, cfg, systemPrompt, text);
+    const rawText = await callAI(provider, cfg, systemPrompt, text, currentAnalysisAbort.signal);
     const record = {
       id: uid(),
       type: 'briefing',
@@ -986,25 +991,69 @@ async function runAnalysis(){
     await refreshHistory();
   } catch (err){
     console.error(err);
-    renderErrorView(err.message || '분석 중 오류가 발생했습니다');
+    if (err.name === 'AbortError'){
+      renderErrorView('사용자가 분석을 취소했습니다.');
+    } else {
+      renderErrorView(explainApiError(err.message || '분석 중 오류가 발생했습니다'));
+    }
+  } finally {
+    stopLoadingTimer();
+    currentAnalysisAbort = null;
   }
 }
 
-function renderLoadingView(provider){
+function explainApiError(msg){
+  if (/\b504\b/.test(msg)){
+    return msg + '\n\n(504 = Gateway Timeout — 우리 앱이 아니라 중간 프록시/게이트웨이가 실제 AI 모델의 응답을 기다리다 시간 초과로 끊은 것입니다. 모델명이 올바른지, 프록시 서비스 상태를 확인해보세요.)';
+  }
+  if (/\b502\b/.test(msg)){
+    return msg + '\n\n(502 = Bad Gateway — 프록시/게이트웨이가 업스트림 서버로부터 잘못된 응답을 받았습니다. 엔드포인트 URL이나 모델명을 확인해보세요.)';
+  }
+  if (/\b401\b/.test(msg)){
+    return msg + '\n\n(401 = 인증 실패 — API 키가 잘못되었거나 만료되었을 수 있습니다.)';
+  }
+  if (/\b429\b/.test(msg)){
+    return msg + '\n\n(429 = 요청 한도 초과 — 잠시 후 다시 시도해주세요.)';
+  }
+  return msg;
+}
+
+function cancelAnalysis(){
+  if (currentAnalysisAbort) currentAnalysisAbort.abort();
+}
+
+function stopLoadingTimer(){
+  if (loadingTimerInterval){ clearInterval(loadingTimerInterval); loadingTimerInterval = null; }
+}
+
+function renderLoadingView(displayName){
   document.getElementById('content').innerHTML = `
     <div id="loadingView">
       <div class="seal-spin"></div>
-      <div style="font-family:var(--font-display); font-size:16px; margin-bottom:6px;">${PROVIDER_LABELS[provider]}로 시나리오를 분석하고 있습니다…</div>
+      <div style="font-family:var(--font-display); font-size:16px; margin-bottom:6px;">${escapeHtml(displayName)}${particleRo(displayName)} 시나리오를 분석하고 있습니다…</div>
       <div id="loadingMsg">세계관, NPC, 주의사항, 연출 포인트를 정리하는 중</div>
+      <div id="loadingElapsed" style="margin-top:10px; font-size:12px; color:var(--muted);">경과 시간: 0:00</div>
+      <button class="ghost-btn" style="margin-top:16px;" onclick="cancelAnalysis()">취소</button>
     </div>
   `;
+  const startedAt = Date.now();
+  stopLoadingTimer();
+  loadingTimerInterval = setInterval(() => {
+    const el = document.getElementById('loadingElapsed');
+    if (!el){ stopLoadingTimer(); return; }
+    const sec = Math.floor((Date.now() - startedAt) / 1000);
+    const m = Math.floor(sec / 60);
+    const s = String(sec % 60).padStart(2, '0');
+    el.textContent = `경과 시간: ${m}:${s}`;
+    if (sec === 60 || sec === 180) el.textContent += ' — 시나리오가 길면 원래 오래 걸릴 수 있어요';
+  }, 1000);
 }
 
 function renderErrorView(msg){
   document.getElementById('content').innerHTML = `
     <div class="card">
       <div class="section-title">분석에 실패했습니다</div>
-      <div class="section-desc">${escapeHtml(msg)}</div>
+      <div class="section-desc" style="white-space:pre-line;">${escapeHtml(msg)}</div>
       <button class="primary-btn" onclick="renderIntakeView()">돌아가기</button>
     </div>
   `;
@@ -1013,28 +1062,29 @@ function renderErrorView(msg){
 /* ============================================================
    AI 호출 — 공급자별 디스패치
 ============================================================ */
-async function callAI(provider, cfg, systemPrompt, userText){
+async function callAI(provider, cfg, systemPrompt, userText, signal){
   const userMsg = `다음 시나리오를 분석해줘:\n\n${userText}`;
   switch(provider){
     case 'anthropic':
-      return callAnthropic(cfg.apiKey, cfg.model || PROVIDER_DEFAULT_MODEL.anthropic, systemPrompt, userMsg);
+      return callAnthropic(cfg.apiKey, cfg.model || PROVIDER_DEFAULT_MODEL.anthropic, systemPrompt, userMsg, signal);
     case 'gemini':
-      return callGemini(cfg.apiKey, cfg.model || PROVIDER_DEFAULT_MODEL.gemini, systemPrompt, userMsg);
+      return callGemini(cfg.apiKey, cfg.model || PROVIDER_DEFAULT_MODEL.gemini, systemPrompt, userMsg, signal);
     case 'openai':
-      return callOpenAICompatible(cfg.apiKey, 'https://api.openai.com/v1/chat/completions', cfg.model || PROVIDER_DEFAULT_MODEL.openai, systemPrompt, userMsg);
+      return callOpenAICompatible(cfg.apiKey, 'https://api.openai.com/v1/chat/completions', cfg.model || PROVIDER_DEFAULT_MODEL.openai, systemPrompt, userMsg, signal);
     case 'deepseek':
-      return callOpenAICompatible(cfg.apiKey, 'https://api.deepseek.com/chat/completions', cfg.model || PROVIDER_DEFAULT_MODEL.deepseek, systemPrompt, userMsg);
+      return callOpenAICompatible(cfg.apiKey, 'https://api.deepseek.com/chat/completions', cfg.model || PROVIDER_DEFAULT_MODEL.deepseek, systemPrompt, userMsg, signal);
     case 'custom':
       if (!cfg.endpoint) throw new Error('커스텀 엔드포인트 URL을 설정해주세요');
-      return callOpenAICompatible(cfg.apiKey, cfg.endpoint, cfg.model, systemPrompt, userMsg);
+      return callOpenAICompatible(cfg.apiKey, cfg.endpoint, cfg.model, systemPrompt, userMsg, signal);
     default:
       throw new Error('알 수 없는 AI 공급자입니다');
   }
 }
 
-async function callAnthropic(apiKey, model, systemPrompt, userMsg){
+async function callAnthropic(apiKey, model, systemPrompt, userMsg, signal){
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
+    signal,
     headers: {
       'Content-Type': 'application/json',
       'x-api-key': apiKey,
@@ -1055,10 +1105,11 @@ async function callAnthropic(apiKey, model, systemPrompt, userMsg){
   return block.text;
 }
 
-async function callGemini(apiKey, model, systemPrompt, userMsg){
+async function callGemini(apiKey, model, systemPrompt, userMsg, signal){
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
   const res = await fetch(url, {
     method: 'POST',
+    signal,
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       systemInstruction: { parts: [{ text: systemPrompt }] },
@@ -1073,9 +1124,10 @@ async function callGemini(apiKey, model, systemPrompt, userMsg){
   return parts.map(p => p.text || '').join('');
 }
 
-async function callOpenAICompatible(apiKey, endpoint, model, systemPrompt, userMsg){
+async function callOpenAICompatible(apiKey, endpoint, model, systemPrompt, userMsg, signal){
   const res = await fetch(endpoint, {
     method: 'POST',
+    signal,
     headers: {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${apiKey}`
@@ -1229,6 +1281,16 @@ function hasBatchim(word){
     if (/[A-Za-z0-9]/.test(word[i])) return false;
   }
   return false;
+}
+// 로/으로 조사 선택 (받침 있으면 으로, 없거나 ㄹ받침이면 로)
+function particleRo(word){
+  if (!word) return '로';
+  const last = word[word.length - 1];
+  const code = last.charCodeAt(0);
+  if (code < 0xAC00 || code > 0xD7A3) return hasBatchim(word) ? '으로' : '로';
+  const jong = (code - 0xAC00) % 28;
+  if (jong === 0 || jong === 8) return '로'; // 받침 없음 또는 ㄹ받침
+  return '으로';
 }
 const PARTICLE_PAIRS = {
   '은':['은','는'], '는':['은','는'],
