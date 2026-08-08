@@ -1,0 +1,1020 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>키퍼 브리핑 — CoC 마스터링 어시스턴트</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/pretendard/dist/web/static/pretendard.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+KR:wght@500;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<style>
+:root{
+  --void:#0f1310;
+  --panel:#161c18;
+  --elevated:#202822;
+  --hairline:#2c352e;
+  --verdigris:#5c9c7c;
+  --verdigris-soft:rgba(92,156,124,0.18);
+  --verdigris-dim:rgba(92,156,124,0.45);
+  --parchment:#eae4d3;
+  --parchment-dim:#a8a99a;
+  --muted:#767f74;
+  --rust:#b5583f;
+  --rust-soft:rgba(181,88,63,0.16);
+  --font-display:'Noto Serif KR', serif;
+  --font-body:'Pretendard', -apple-system, 'Malgun Gothic', sans-serif;
+}
+*{box-sizing:border-box;}
+html,body{margin:0;padding:0;}
+body{
+  background:var(--void);
+  color:var(--parchment);
+  font-family:var(--font-body);
+  min-height:100vh;
+  line-height:1.6;
+}
+
+/* ============ layout ============ */
+#app{display:flex; min-height:100vh;}
+
+#sidebar{
+  width:260px;
+  min-width:260px;
+  background:var(--panel);
+  border-right:1px solid var(--hairline);
+  display:flex;
+  flex-direction:column;
+  padding:16px 12px;
+  position:sticky;
+  top:0;
+  height:100vh;
+  overflow-y:auto;
+  transition:transform 0.2s ease;
+}
+#sidebar.collapsed{ transform:translateX(-100%); position:fixed; z-index:50; }
+.brand{
+  font-family:var(--font-display);
+  font-weight:700;
+  font-size:17px;
+  color:var(--parchment);
+  padding:6px 6px 4px;
+  letter-spacing:0.02em;
+}
+.brand-sub{
+  font-size:11px;
+  color:var(--muted);
+  padding:0 6px 16px;
+  letter-spacing:0.03em;
+}
+.new-btn{
+  display:flex; align-items:center; gap:8px;
+  background:var(--verdigris-soft);
+  border:1px solid var(--verdigris-dim);
+  color:var(--verdigris);
+  font-weight:600;
+  font-size:13px;
+  padding:10px 12px;
+  border-radius:8px;
+  cursor:pointer;
+  margin-bottom:14px;
+}
+.new-btn:hover{ background:rgba(92,156,124,0.28); }
+
+#historyLabel{
+  font-size:11px;
+  color:var(--muted);
+  text-transform:uppercase;
+  letter-spacing:0.08em;
+  padding:4px 8px 8px;
+}
+#historyList{ list-style:none; margin:0; padding:0; flex:1; overflow-y:auto; }
+#historyList li{
+  padding:9px 10px;
+  border-radius:7px;
+  cursor:pointer;
+  font-size:13px;
+  margin-bottom:2px;
+  color:var(--parchment-dim);
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  gap:6px;
+}
+#historyList li:hover{ background:var(--elevated); color:var(--parchment); }
+#historyList li.active{ background:var(--verdigris-soft); color:var(--verdigris); font-weight:600; }
+#historyList .doc-title-wrap{ overflow:hidden; flex:1; }
+#historyList .doc-title{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; display:block; }
+#historyList .doc-provider{ font-size:10px; color:var(--muted); }
+#historyList li.active .doc-provider{ color:var(--verdigris-dim); }
+#historyList .doc-del{
+  opacity:0; font-size:11px; color:var(--muted); padding:2px 5px; border-radius:4px; flex-shrink:0;
+}
+#historyList li:hover .doc-del{ opacity:1; }
+#historyList .doc-del:hover{ background:var(--rust-soft); color:var(--rust); }
+
+.sidebar-footer{
+  border-top:1px solid var(--hairline);
+  padding-top:10px;
+  margin-top:10px;
+}
+.settings-btn{
+  width:100%;
+  background:transparent;
+  border:1px solid var(--hairline);
+  color:var(--parchment-dim);
+  font-size:12px;
+  padding:9px 10px;
+  border-radius:7px;
+  cursor:pointer;
+  text-align:left;
+}
+.settings-btn:hover{ border-color:var(--verdigris-dim); color:var(--parchment); }
+
+#main{ flex:1; min-width:0; display:flex; flex-direction:column; }
+
+#topbar{
+  display:flex; align-items:center; gap:10px;
+  padding:12px 20px;
+  border-bottom:1px solid var(--hairline);
+  position:sticky; top:0; background:var(--void); z-index:10;
+}
+#menuToggle{
+  display:none;
+  background:none; border:none; color:var(--parchment); font-size:18px; cursor:pointer;
+  padding:4px 8px;
+}
+#topbarTitle{ font-family:var(--font-display); font-size:15px; color:var(--parchment-dim); }
+
+#content{ flex:1; padding:28px; max-width:920px; width:100%; margin:0 auto; }
+
+/* ============ intake form ============ */
+.card{
+  background:var(--panel);
+  border:1px solid var(--hairline);
+  border-radius:12px;
+  padding:22px;
+}
+.section-title{
+  font-family:var(--font-display);
+  font-size:20px;
+  font-weight:700;
+  margin:0 0 4px;
+}
+.section-desc{ color:var(--muted); font-size:13px; margin:0 0 18px; }
+
+label.field-label{
+  display:block; font-size:12px; color:var(--parchment-dim); margin-bottom:6px; font-weight:600;
+}
+input[type=text], input[type=password], textarea, select{
+  width:100%;
+  background:var(--elevated);
+  border:1px solid var(--hairline);
+  color:var(--parchment);
+  border-radius:8px;
+  padding:10px 12px;
+  font-family:var(--font-body);
+  font-size:14px;
+  outline:none;
+}
+input[type=text]:focus, input[type=password]:focus, textarea:focus, select:focus{ border-color:var(--verdigris-dim); }
+textarea{ min-height:220px; resize:vertical; line-height:1.6; }
+textarea.prompt-area{ min-height:180px; font-size:13px; }
+.field-gap{ margin-bottom:16px; }
+
+.upload-row{ display:flex; gap:10px; align-items:center; margin-bottom:16px; flex-wrap:wrap; }
+.file-btn{
+  background:var(--elevated);
+  border:1px dashed var(--hairline);
+  color:var(--parchment-dim);
+  padding:9px 14px;
+  border-radius:8px;
+  font-size:13px;
+  cursor:pointer;
+}
+.file-btn:hover{ border-color:var(--verdigris-dim); color:var(--parchment); }
+#pdfFileName{ font-size:12px; color:var(--verdigris); }
+
+.primary-btn{
+  background:var(--verdigris);
+  color:#0f1310;
+  border:none;
+  font-weight:700;
+  font-size:14px;
+  padding:12px 20px;
+  border-radius:8px;
+  cursor:pointer;
+}
+.primary-btn:hover{ filter:brightness(1.08); }
+.primary-btn:disabled{ opacity:0.5; cursor:not-allowed; }
+
+.hint{ font-size:12px; color:var(--muted); margin-top:8px; }
+
+.provider-pill-row{ display:flex; gap:8px; flex-wrap:wrap; margin-bottom:16px; }
+.provider-pill{
+  border:1px solid var(--hairline);
+  background:var(--elevated);
+  color:var(--parchment-dim);
+  font-size:12.5px;
+  padding:7px 12px;
+  border-radius:20px;
+  cursor:pointer;
+}
+.provider-pill.active{ border-color:var(--verdigris-dim); background:var(--verdigris-soft); color:var(--verdigris); font-weight:600; }
+.provider-pill.unset{ opacity:0.45; }
+
+/* ============ loading ============ */
+#loadingView{ text-align:center; padding:60px 20px; color:var(--parchment-dim); }
+.seal-spin{
+  width:52px; height:52px; margin:0 auto 18px;
+  border:2px solid var(--hairline);
+  border-top-color:var(--verdigris);
+  border-radius:50%;
+  animation:spin 1s linear infinite;
+}
+@keyframes spin{ to{ transform:rotate(360deg); } }
+#loadingMsg{ font-size:13px; color:var(--muted); }
+
+/* ============ results ============ */
+.result-header{ display:flex; justify-content:space-between; align-items:flex-start; gap:12px; margin-bottom:20px; flex-wrap:wrap; }
+.result-title{ font-family:var(--font-display); font-size:22px; font-weight:700; }
+.result-provider-tag{ font-size:11px; color:var(--verdigris); margin-top:4px; }
+.result-actions{ display:flex; gap:8px; }
+.ghost-btn{
+  background:transparent; border:1px solid var(--hairline); color:var(--parchment-dim);
+  padding:7px 12px; border-radius:7px; font-size:12px; cursor:pointer;
+}
+.ghost-btn:hover{ border-color:var(--verdigris-dim); color:var(--parchment); }
+
+.folio{
+  border:1px solid var(--hairline);
+  border-radius:10px;
+  margin-bottom:14px;
+  background:var(--panel);
+  overflow:hidden;
+}
+.folio-head{
+  display:flex; align-items:center; gap:10px;
+  padding:14px 16px;
+  cursor:pointer;
+  user-select:none;
+}
+.folio-icon{ font-size:16px; color:var(--verdigris); flex-shrink:0; }
+.folio-name{ font-family:var(--font-display); font-weight:700; font-size:15px; flex:1; }
+.folio-chevron{ color:var(--muted); font-size:12px; transition:transform 0.15s; }
+.folio.open .folio-chevron{ transform:rotate(90deg); }
+.folio-body{ display:none; padding:0 18px 18px; border-top:1px solid var(--hairline); }
+.folio.open .folio-body{ display:block; padding-top:14px; }
+
+.folio-body p{ margin:0 0 10px; font-size:14px; color:var(--parchment); }
+.folio-body ul{ margin:0 0 10px; padding-left:20px; font-size:14px; }
+.folio-body li{ margin-bottom:6px; }
+
+/* ============ modal ============ */
+.modal-overlay{
+  position:fixed; inset:0; background:rgba(0,0,0,0.6);
+  display:flex; align-items:center; justify-content:center; z-index:100;
+  padding:20px;
+}
+.modal-overlay.hidden{ display:none; }
+.modal-box{
+  background:var(--panel);
+  border:1px solid var(--hairline);
+  border-radius:12px;
+  width:480px; max-width:100%;
+  max-height:88vh;
+  overflow-y:auto;
+  padding:20px;
+}
+.modal-box h3{ font-family:var(--font-display); margin:0 0 4px; font-size:17px; }
+.modal-box .modal-sub{ color:var(--muted); font-size:12px; margin:0 0 16px; }
+.modal-actions{ display:flex; justify-content:flex-end; gap:8px; margin-top:18px; }
+.modal-section-label{
+  font-size:11px; color:var(--verdigris); text-transform:uppercase; letter-spacing:0.08em;
+  font-weight:700; margin:20px 0 10px; padding-top:14px; border-top:1px solid var(--hairline);
+}
+.modal-section-label:first-of-type{ border-top:none; padding-top:0; margin-top:0; }
+
+.key-row{ display:flex; gap:8px; align-items:center; }
+.key-row input{ flex:1; }
+.icon-btn{
+  background:var(--elevated); border:1px solid var(--hairline); color:var(--parchment-dim);
+  border-radius:8px; padding:0 12px; height:40px; cursor:pointer; font-size:13px; flex-shrink:0;
+}
+.icon-btn:hover{ border-color:var(--verdigris-dim); color:var(--parchment); }
+.test-result{ font-size:12px; margin-top:6px; min-height:16px; }
+.test-result.ok{ color:var(--verdigris); }
+.test-result.fail{ color:var(--rust); }
+
+.toast{
+  position:fixed; bottom:20px; left:50%; transform:translateX(-50%);
+  background:var(--elevated); border:1px solid var(--verdigris-dim); color:var(--parchment);
+  padding:9px 16px; border-radius:8px; font-size:13px; opacity:0; pointer-events:none;
+  transition:opacity 0.2s; z-index:200; max-width:90vw; text-align:center;
+}
+.toast.show{ opacity:1; }
+
+@media (max-width: 760px){
+  #sidebar{ position:fixed; z-index:50; transform:translateX(-100%); }
+  #sidebar.open{ transform:translateX(0); }
+  #menuToggle{ display:inline-block; }
+  #content{ padding:18px; }
+}
+</style>
+</head>
+<body>
+
+<div id="app">
+  <aside id="sidebar">
+    <div class="brand">키퍼 브리핑</div>
+    <div class="brand-sub">CoC 마스터링 어시스턴트</div>
+    <button class="new-btn" onclick="startNewAnalysis()">＋ 새 시나리오 분석</button>
+    <div id="historyLabel">지난 분석</div>
+    <ul id="historyList"></ul>
+    <div class="sidebar-footer">
+      <button class="settings-btn" onclick="openSettings()">⚙ AI 설정</button>
+    </div>
+  </aside>
+
+  <main id="main">
+    <div id="topbar">
+      <button id="menuToggle" onclick="toggleSidebar()">☰</button>
+      <div id="topbarTitle">시나리오 사전 브리핑 도구</div>
+    </div>
+    <div id="content">
+      <!-- 뷰가 여기 렌더링됩니다 -->
+    </div>
+  </main>
+</div>
+
+<!-- 설정 모달 -->
+<div id="settingsModal" class="modal-overlay hidden">
+  <div class="modal-box">
+    <h3>⚙ 설정</h3>
+    <div class="modal-sub">API 키는 이 브라우저(localStorage)에만 저장되며 서버로 전송되지 않습니다.</div>
+
+    <div class="modal-section-label">🤖 AI CONFIGURATION</div>
+
+    <label class="field-label">편집할 공급자</label>
+    <select id="settingsProviderSelect" class="field-gap" onchange="renderProviderFields()">
+      <option value="gemini">Google Gemini</option>
+      <option value="openai">OpenAI</option>
+      <option value="anthropic">Anthropic Claude</option>
+      <option value="deepseek">DeepSeek</option>
+      <option value="custom">커스텀 (Custom)</option>
+    </select>
+
+    <div id="providerFieldsContainer"></div>
+
+    <div class="key-row field-gap">
+      <button class="icon-btn" onclick="handleTestConnection()">⚡ 연결 테스트</button>
+      <span class="test-result" id="testResult"></span>
+    </div>
+
+    <div class="modal-section-label">📝 SYSTEM PROMPT</div>
+    <div class="hint" style="margin:0 0 8px;">AI 역할과 출력 형식을 정의합니다. 기본값이 입력되어 있으니 필요한 부분만 고쳐 쓰세요.</div>
+    <textarea id="systemPromptInput" class="prompt-area field-gap"></textarea>
+    <button class="ghost-btn" onclick="resetSystemPrompt()">기본값으로 되돌리기</button>
+
+    <div class="modal-actions">
+      <button class="ghost-btn" onclick="closeSettings()">닫기</button>
+      <button class="primary-btn" onclick="saveSettings()">저장</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="toast"></div>
+
+<script>
+/* ============================================================
+   상수 & 상태
+============================================================ */
+const DB_NAME = 'keeper-briefing';
+const DB_VERSION = 1;
+const STORE = 'analyses';
+let db = null;
+let currentDoc = null;
+
+const PROVIDER_LABELS = {
+  gemini: 'Google Gemini',
+  openai: 'OpenAI',
+  anthropic: 'Anthropic Claude',
+  deepseek: 'DeepSeek',
+  custom: '커스텀'
+};
+
+const PROVIDER_DEFAULT_MODEL = {
+  gemini: 'gemini-2.5-flash',
+  openai: 'gpt-4o',
+  anthropic: 'claude-sonnet-5',
+  deepseek: 'deepseek-chat',
+  custom: ''
+};
+
+const DEFAULT_SYSTEM_PROMPT = `당신은 크툴루의 부름(Call of Cthulhu) 7판 경험이 풍부한 마스터링 조언가입니다.
+주어진 시나리오 본문을 분석해서, 이 시나리오를 처음 진행하는 키퍼(GM)가 세션 전에 읽을 "사전 브리핑"을 작성합니다.
+
+다음 원칙을 반영하세요:
+- 시나리오 원문을 그대로 베끼지 말고 요약·재구성할 것
+- 트리거(자해, 가족 학대, 성폭력, 아동 위해, 자살, 극단적 신체 훼손 등)가 있다면 반드시 짚어줄 것. 없다면 "특별한 트리거 없음"이라고 명시할 것
+- NPC는 즉석 연기가 쉽도록 말투·인상·스테레오타입 하나를 짚어줄 것
+- 플레이어가 시나리오를 이탈할 수 있는 분기점과 유연하게 대응하는 방법을 짚어줄 것
+- 묘사·연출 제안은 실제 장면에 바로 쓸 수 있는 구체적 문장(나레이션·대사 예시 포함)으로 제시할 것
+- 과장하지 말고 실용적으로, 키퍼링 초심자도 이해할 수 있게 쓸 것
+
+마크다운 형식으로 작성하고, 반드시 아래 8개의 ## 섹션 제목을 그대로 사용하세요 (섹션 순서와 제목을 유지해주세요):
+
+## 세계관 & 배경
+## 난이도 & 진행 주의점
+## 주의사항 & 트리거
+## NPC 분석
+## KPC 롤플레잉 팁
+## 분기점 & 개변 가이드
+## 묘사·연출 확장
+## 종합 마스터링 조언`;
+
+function loadProviders(){
+  try {
+    const raw = localStorage.getItem('kb_providers');
+    if (raw) return JSON.parse(raw);
+  } catch(e){}
+  // 구버전 키 마이그레이션
+  const legacyKey = localStorage.getItem('kb_api_key');
+  const legacyModel = localStorage.getItem('kb_model');
+  const base = {
+    gemini: { apiKey:'', model: PROVIDER_DEFAULT_MODEL.gemini },
+    openai: { apiKey:'', model: PROVIDER_DEFAULT_MODEL.openai },
+    anthropic: { apiKey:'', model: PROVIDER_DEFAULT_MODEL.anthropic },
+    deepseek: { apiKey:'', model: PROVIDER_DEFAULT_MODEL.deepseek },
+    custom: { apiKey:'', model:'', endpoint:'' }
+  };
+  if (legacyKey){
+    base.anthropic.apiKey = legacyKey;
+    base.anthropic.model = legacyModel || PROVIDER_DEFAULT_MODEL.anthropic;
+  }
+  return base;
+}
+function saveProviders(p){ localStorage.setItem('kb_providers', JSON.stringify(p)); }
+
+let providersState = loadProviders();
+
+/* ============================================================
+   IndexedDB
+============================================================ */
+function openDB(){
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME, DB_VERSION);
+    req.onupgradeneeded = (e) => {
+      const _db = e.target.result;
+      if (!_db.objectStoreNames.contains(STORE)) {
+        const store = _db.createObjectStore(STORE, { keyPath: 'id' });
+        store.createIndex('createdAt', 'createdAt');
+      }
+    };
+    req.onsuccess = (e) => resolve(e.target.result);
+    req.onerror = (e) => reject(e.target.error);
+  });
+}
+function dbPut(record){
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE, 'readwrite');
+    tx.objectStore(STORE).put(record);
+    tx.oncomplete = () => resolve();
+    tx.onerror = (e) => reject(e.target.error);
+  });
+}
+function dbGetAll(){
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE, 'readonly');
+    const req = tx.objectStore(STORE).getAll();
+    req.onsuccess = () => resolve(req.result.sort((a,b) => b.createdAt - a.createdAt));
+    req.onerror = (e) => reject(e.target.error);
+  });
+}
+function dbDelete(id){
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE, 'readwrite');
+    tx.objectStore(STORE).delete(id);
+    tx.oncomplete = () => resolve();
+    tx.onerror = (e) => reject(e.target.error);
+  });
+}
+
+/* ============================================================
+   초기화
+============================================================ */
+window.addEventListener('DOMContentLoaded', async () => {
+  db = await openDB();
+  await refreshHistory();
+  renderIntakeView();
+});
+
+/* ============================================================
+   사이드바 / 히스토리
+============================================================ */
+async function refreshHistory(){
+  const list = document.getElementById('historyList');
+  const items = await dbGetAll();
+  list.innerHTML = '';
+  if (items.length === 0){
+    list.innerHTML = '<li style="color:var(--muted); cursor:default;">아직 분석 기록이 없습니다</li>';
+    return;
+  }
+  items.forEach(item => {
+    const li = document.createElement('li');
+    if (currentDoc && currentDoc.id === item.id) li.classList.add('active');
+    const providerLabel = PROVIDER_LABELS[item.provider] || '';
+    li.innerHTML = `<span class="doc-title-wrap"><span class="doc-title">${escapeHtml(item.title)}</span><span class="doc-provider">${escapeHtml(providerLabel)}</span></span><span class="doc-del" onclick="event.stopPropagation(); deleteAnalysis('${item.id}')">✕</span>`;
+    li.onclick = () => loadAnalysis(item.id);
+    list.appendChild(li);
+  });
+}
+
+async function loadAnalysis(id){
+  const items = await dbGetAll();
+  const item = items.find(i => i.id === id);
+  if (!item) return;
+  currentDoc = item;
+  renderResultView(item);
+  await refreshHistory();
+  closeSidebarOnMobile();
+}
+
+async function deleteAnalysis(id){
+  if (!confirm('이 분석 기록을 삭제할까요?')) return;
+  await dbDelete(id);
+  if (currentDoc && currentDoc.id === id){
+    currentDoc = null;
+    renderIntakeView();
+  }
+  await refreshHistory();
+}
+
+function startNewAnalysis(){
+  currentDoc = null;
+  renderIntakeView();
+  closeSidebarOnMobile();
+}
+
+function toggleSidebar(){
+  document.getElementById('sidebar').classList.toggle('open');
+}
+function closeSidebarOnMobile(){
+  if (window.innerWidth <= 760) document.getElementById('sidebar').classList.remove('open');
+}
+
+/* ============================================================
+   설정 모달
+============================================================ */
+function openSettings(){
+  providersState = loadProviders();
+  document.getElementById('settingsProviderSelect').value = localStorage.getItem('kb_active_provider') || 'anthropic';
+  renderProviderFields();
+  document.getElementById('systemPromptInput').value = localStorage.getItem('kb_system_prompt') || DEFAULT_SYSTEM_PROMPT;
+  document.getElementById('testResult').textContent = '';
+  document.getElementById('settingsModal').classList.remove('hidden');
+}
+function closeSettings(){ document.getElementById('settingsModal').classList.add('hidden'); }
+
+function renderProviderFields(){
+  const provider = document.getElementById('settingsProviderSelect').value;
+  const cfg = providersState[provider] || {};
+  const container = document.getElementById('providerFieldsContainer');
+
+  let endpointHtml = '';
+  if (provider === 'custom'){
+    endpointHtml = `
+      <label class="field-label">API ENDPOINT URL</label>
+      <input type="text" id="providerEndpoint" class="field-gap" placeholder="https://api.example.com/v1/chat/completions" value="${escapeHtml(cfg.endpoint||'')}">
+      <div class="hint" style="margin:-10px 0 14px;">OpenAI 호환(Chat Completions) 엔드포인트를 입력하세요</div>
+    `;
+  }
+
+  container.innerHTML = `
+    ${endpointHtml}
+    <label class="field-label">모델명</label>
+    <input type="text" id="providerModel" class="field-gap" placeholder="${escapeHtml(PROVIDER_DEFAULT_MODEL[provider] || '모델명을 입력하세요')}" value="${escapeHtml(cfg.model||'')}">
+    <label class="field-label">API KEY</label>
+    <div class="key-row field-gap">
+      <input type="password" id="providerApiKey" placeholder="sk-..." value="${escapeHtml(cfg.apiKey||'')}">
+      <button class="icon-btn" type="button" onclick="toggleKeyVisibility()">👁</button>
+    </div>
+    <div class="hint" style="margin-top:-10px;">키는 브라우저 localStorage에만 저장됩니다</div>
+  `;
+  document.getElementById('testResult').textContent = '';
+}
+
+function toggleKeyVisibility(){
+  const el = document.getElementById('providerApiKey');
+  el.type = el.type === 'password' ? 'text' : 'password';
+}
+
+function collectCurrentProviderFieldsIntoState(){
+  const provider = document.getElementById('settingsProviderSelect').value;
+  const apiKey = document.getElementById('providerApiKey').value.trim();
+  const model = document.getElementById('providerModel').value.trim();
+  providersState[provider] = providersState[provider] || {};
+  providersState[provider].apiKey = apiKey;
+  providersState[provider].model = model;
+  if (provider === 'custom'){
+    providersState[provider].endpoint = document.getElementById('providerEndpoint').value.trim();
+  }
+}
+
+function saveSettings(){
+  collectCurrentProviderFieldsIntoState();
+  saveProviders(providersState);
+  localStorage.setItem('kb_system_prompt', document.getElementById('systemPromptInput').value);
+  closeSettings();
+  showToast('설정이 저장되었습니다');
+  renderIntakeView();
+}
+
+function resetSystemPrompt(){
+  document.getElementById('systemPromptInput').value = DEFAULT_SYSTEM_PROMPT;
+}
+
+async function handleTestConnection(){
+  collectCurrentProviderFieldsIntoState();
+  const provider = document.getElementById('settingsProviderSelect').value;
+  const cfg = providersState[provider];
+  const resultEl = document.getElementById('testResult');
+  resultEl.className = 'test-result';
+  resultEl.textContent = '테스트 중…';
+  try {
+    await testConnection(provider, cfg);
+    resultEl.className = 'test-result ok';
+    resultEl.textContent = '✓ 연결 성공';
+  } catch(e){
+    resultEl.className = 'test-result fail';
+    resultEl.textContent = '✕ 연결 실패: ' + (e.message || '').slice(0,120);
+  }
+}
+
+/* ============================================================
+   유틸
+============================================================ */
+function escapeHtml(str){
+  const d = document.createElement('div');
+  d.textContent = str || '';
+  return d.innerHTML;
+}
+function showToast(msg){
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2400);
+}
+function uid(){ return 'a_' + Date.now() + '_' + Math.random().toString(36).slice(2,8); }
+
+function getConfiguredProviders(){
+  return Object.keys(providersState).filter(p => providersState[p] && providersState[p].apiKey);
+}
+
+/* ============================================================
+   뷰: 입력(intake) 화면
+============================================================ */
+function renderIntakeView(){
+  const content = document.getElementById('content');
+  const configured = getConfiguredProviders();
+  const activeProvider = localStorage.getItem('kb_active_provider') || configured[0] || 'anthropic';
+
+  const pillsHtml = Object.keys(PROVIDER_LABELS).map(p => {
+    const isSet = !!(providersState[p] && providersState[p].apiKey);
+    const isActive = p === activeProvider;
+    return `<div class="provider-pill${isActive?' active':''}${isSet?'':' unset'}" onclick="selectProviderPill('${p}')">${PROVIDER_LABELS[p]}${isSet?'':' (미설정)'}</div>`;
+  }).join('');
+
+  content.innerHTML = `
+    <div class="card">
+      <div class="section-title">시나리오 분석하기</div>
+      <div class="section-desc">시나리오 본문을 붙여넣거나 PDF를 업로드하면, 키퍼링에 필요한 브리핑을 정리해드립니다.</div>
+
+      <label class="field-label">사용할 AI</label>
+      <div class="provider-pill-row">${pillsHtml}</div>
+
+      <label class="field-label">시나리오 제목</label>
+      <input type="text" id="titleInput" class="field-gap" placeholder="예: 식탁 위에 고등어가 있었다">
+
+      <div class="upload-row">
+        <label class="file-btn">
+          PDF 업로드
+          <input type="file" id="pdfInput" accept="application/pdf" style="display:none" onchange="handlePdfUpload(event)">
+        </label>
+        <span id="pdfFileName"></span>
+      </div>
+
+      <label class="field-label">시나리오 본문</label>
+      <textarea id="scenarioText" class="field-gap" placeholder="여기에 시나리오 텍스트를 붙여넣으세요 (PDF 업로드 시 자동으로 채워집니다)"></textarea>
+
+      <button class="primary-btn" id="analyzeBtn" onclick="runAnalysis()">브리핑 생성하기</button>
+      <div class="hint">CoC 7판 기준으로 세계관, 주의사항·트리거, NPC 롤플레잉, KPC 팁, 묘사·연출 확장을 정리합니다. AI 설정에서 사용할 서비스와 키를 먼저 등록해주세요.</div>
+    </div>
+  `;
+  if (!localStorage.getItem('kb_active_provider') && activeProvider){
+    localStorage.setItem('kb_active_provider', activeProvider);
+  }
+}
+
+function selectProviderPill(provider){
+  localStorage.setItem('kb_active_provider', provider);
+  renderIntakeView();
+}
+
+async function handlePdfUpload(e){
+  const file = e.target.files[0];
+  if (!file) return;
+  document.getElementById('pdfFileName').textContent = `추출 중... (${file.name})`;
+  try {
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    const buf = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+    let text = '';
+    for (let i = 1; i <= pdf.numPages; i++){
+      const page = await pdf.getPage(i);
+      const content = await page.getTextContent();
+      text += content.items.map(it => it.str).join(' ') + '\n\n';
+    }
+    document.getElementById('scenarioText').value = text.trim();
+    document.getElementById('pdfFileName').textContent = `✓ ${file.name} (${pdf.numPages}페이지 추출 완료)`;
+    if (!document.getElementById('titleInput').value){
+      document.getElementById('titleInput').value = file.name.replace(/\.pdf$/i, '');
+    }
+  } catch (err){
+    console.error(err);
+    document.getElementById('pdfFileName').textContent = '추출 실패 — 본문을 직접 붙여넣어 주세요';
+  }
+}
+
+/* ============================================================
+   분석 실행
+============================================================ */
+async function runAnalysis(){
+  const provider = localStorage.getItem('kb_active_provider') || 'anthropic';
+  const cfg = providersState[provider] || {};
+  const systemPrompt = localStorage.getItem('kb_system_prompt') || DEFAULT_SYSTEM_PROMPT;
+  const title = document.getElementById('titleInput').value.trim() || '제목 없는 시나리오';
+  let text = document.getElementById('scenarioText').value.trim();
+
+  if (!cfg.apiKey){
+    showToast(`${PROVIDER_LABELS[provider]} API 키가 설정되지 않았습니다. 먼저 AI 설정에서 입력해주세요.`);
+    openSettings();
+    document.getElementById('settingsProviderSelect').value = provider;
+    renderProviderFields();
+    return;
+  }
+  if (!text){
+    showToast('시나리오 본문을 입력하거나 PDF를 업로드해주세요');
+    return;
+  }
+  const MAX_CHARS = 180000;
+  if (text.length > MAX_CHARS) text = text.slice(0, MAX_CHARS);
+
+  renderLoadingView(provider);
+
+  try {
+    const rawText = await callAI(provider, cfg, systemPrompt, text);
+    const record = {
+      id: uid(),
+      title,
+      provider,
+      createdAt: Date.now(),
+      rawText
+    };
+    await dbPut(record);
+    currentDoc = record;
+    renderResultView(record);
+    await refreshHistory();
+  } catch (err){
+    console.error(err);
+    renderErrorView(err.message || '분석 중 오류가 발생했습니다');
+  }
+}
+
+function renderLoadingView(provider){
+  document.getElementById('content').innerHTML = `
+    <div id="loadingView">
+      <div class="seal-spin"></div>
+      <div style="font-family:var(--font-display); font-size:16px; margin-bottom:6px;">${PROVIDER_LABELS[provider]}로 시나리오를 분석하고 있습니다…</div>
+      <div id="loadingMsg">세계관, NPC, 주의사항, 연출 포인트를 정리하는 중</div>
+    </div>
+  `;
+}
+
+function renderErrorView(msg){
+  document.getElementById('content').innerHTML = `
+    <div class="card">
+      <div class="section-title">분석에 실패했습니다</div>
+      <div class="section-desc">${escapeHtml(msg)}</div>
+      <button class="primary-btn" onclick="renderIntakeView()">돌아가기</button>
+    </div>
+  `;
+}
+
+/* ============================================================
+   AI 호출 — 공급자별 디스패치
+============================================================ */
+async function callAI(provider, cfg, systemPrompt, userText){
+  const userMsg = `다음 시나리오를 분석해줘:\n\n${userText}`;
+  switch(provider){
+    case 'anthropic':
+      return callAnthropic(cfg.apiKey, cfg.model || PROVIDER_DEFAULT_MODEL.anthropic, systemPrompt, userMsg);
+    case 'gemini':
+      return callGemini(cfg.apiKey, cfg.model || PROVIDER_DEFAULT_MODEL.gemini, systemPrompt, userMsg);
+    case 'openai':
+      return callOpenAICompatible(cfg.apiKey, 'https://api.openai.com/v1/chat/completions', cfg.model || PROVIDER_DEFAULT_MODEL.openai, systemPrompt, userMsg);
+    case 'deepseek':
+      return callOpenAICompatible(cfg.apiKey, 'https://api.deepseek.com/chat/completions', cfg.model || PROVIDER_DEFAULT_MODEL.deepseek, systemPrompt, userMsg);
+    case 'custom':
+      if (!cfg.endpoint) throw new Error('커스텀 엔드포인트 URL을 설정해주세요');
+      return callOpenAICompatible(cfg.apiKey, cfg.endpoint, cfg.model, systemPrompt, userMsg);
+    default:
+      throw new Error('알 수 없는 AI 공급자입니다');
+  }
+}
+
+async function callAnthropic(apiKey, model, systemPrompt, userMsg){
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true'
+    },
+    body: JSON.stringify({
+      model: model,
+      max_tokens: 8000,
+      system: systemPrompt,
+      messages: [{ role: 'user', content: userMsg }]
+    })
+  });
+  if (!res.ok){ throw new Error(`Anthropic API 오류 (${res.status}): ${(await res.text()).slice(0,200)}`); }
+  const data = await res.json();
+  const block = (data.content || []).find(b => b.type === 'text');
+  if (!block) throw new Error('응답에서 분석 결과를 찾지 못했습니다');
+  return block.text;
+}
+
+async function callGemini(apiKey, model, systemPrompt, userMsg){
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      systemInstruction: { parts: [{ text: systemPrompt }] },
+      contents: [{ role: 'user', parts: [{ text: userMsg }] }],
+      generationConfig: { maxOutputTokens: 8000 }
+    })
+  });
+  if (!res.ok){ throw new Error(`Gemini API 오류 (${res.status}): ${(await res.text()).slice(0,200)}`); }
+  const data = await res.json();
+  const parts = data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts;
+  if (!parts) throw new Error('응답에서 분석 결과를 찾지 못했습니다');
+  return parts.map(p => p.text || '').join('');
+}
+
+async function callOpenAICompatible(apiKey, endpoint, model, systemPrompt, userMsg){
+  const res = await fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`
+    },
+    body: JSON.stringify({
+      model: model,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userMsg }
+      ],
+      max_tokens: 8000
+    })
+  });
+  if (!res.ok){ throw new Error(`API 오류 (${res.status}): ${(await res.text()).slice(0,200)}`); }
+  const data = await res.json();
+  const msg = data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
+  if (!msg) throw new Error('응답에서 분석 결과를 찾지 못했습니다');
+  return msg;
+}
+
+async function testConnection(provider, cfg){
+  if (!cfg.apiKey) throw new Error('API 키를 입력해주세요');
+  if (provider === 'custom' && !cfg.endpoint) throw new Error('엔드포인트 URL을 입력해주세요');
+  await callAI(provider, cfg, '당신은 연결 테스트용 어시스턴트입니다. "ok"라고만 답하세요.', 'ping');
+}
+
+/* ============================================================
+   마크다운 → 섹션 렌더링
+============================================================ */
+function splitSections(md){
+  md = (md || '').trim();
+  const chunks = md.split(/\n(?=##\s+)/);
+  const sections = [];
+  for (let chunk of chunks){
+    chunk = chunk.trim();
+    if (!chunk) continue;
+    const m = chunk.match(/^##\s+(.+)/);
+    if (m){
+      sections.push({ title: m[1].trim(), body: chunk.slice(m[0].length).trim() });
+    } else {
+      sections.push({ title: '분석 결과', body: chunk });
+    }
+  }
+  if (sections.length === 0) sections.push({ title: '분석 결과', body: md });
+  return sections;
+}
+
+const SECTION_ICONS = {
+  '세계관 & 배경': '🌫️',
+  '난이도 & 진행 주의점': '⚠️',
+  '주의사항 & 트리거': '🩸',
+  'NPC 분석': '🎭',
+  'KPC 롤플레잉 팁': '📜',
+  '분기점 & 개변 가이드': '🧭',
+  '묘사·연출 확장': '🕯️',
+  '종합 마스터링 조언': '🗝️'
+};
+
+function inlineMd(s){
+  return escapeHtml(s).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/\*(.+?)\*/g, '<i>$1</i>');
+}
+
+function mdToHtml(md){
+  const lines = (md || '').split(/\r?\n/);
+  let html = '';
+  let inList = false;
+  for (const raw of lines){
+    const line = raw.trim();
+    if (line === ''){
+      if (inList){ html += '</ul>'; inList = false; }
+      continue;
+    }
+    if (/^[-*]\s+/.test(line)){
+      if (!inList){ html += '<ul>'; inList = true; }
+      html += `<li>${inlineMd(line.replace(/^[-*]\s+/, ''))}</li>`;
+      continue;
+    }
+    if (inList){ html += '</ul>'; inList = false; }
+    if (/^###\s+/.test(line)){
+      html += `<p><b>${inlineMd(line.replace(/^###\s+/, ''))}</b></p>`;
+    } else {
+      html += `<p>${inlineMd(line)}</p>`;
+    }
+  }
+  if (inList) html += '</ul>';
+  return html || '<p style="color:var(--muted)">내용 없음</p>';
+}
+
+/* ============================================================
+   뷰: 결과(result) 화면
+============================================================ */
+function renderResultView(record){
+  const sections = splitSections(record.rawText);
+  const content = document.getElementById('content');
+
+  const foliosHtml = sections.map((sec, idx) => {
+    const icon = SECTION_ICONS[sec.title] || '📄';
+    return folio(icon, sec.title, mdToHtml(sec.body), idx === 0);
+  }).join('');
+
+  content.innerHTML = `
+    <div class="result-header">
+      <div>
+        <div class="result-title">${escapeHtml(record.title)}</div>
+        <div class="result-provider-tag">${escapeHtml(PROVIDER_LABELS[record.provider] || '')}</div>
+      </div>
+      <div class="result-actions">
+        <button class="ghost-btn" onclick="copyResultAsText()">텍스트로 복사</button>
+        <button class="ghost-btn" onclick="startNewAnalysis()">새 분석</button>
+      </div>
+    </div>
+    ${foliosHtml}
+  `;
+}
+
+function folio(icon, name, bodyHtml, openByDefault){
+  const openClass = openByDefault ? ' open' : '';
+  const fid = 'f_' + Math.random().toString(36).slice(2,8);
+  return `
+    <div class="folio${openClass}" id="${fid}">
+      <div class="folio-head" onclick="toggleFolio('${fid}')">
+        <span class="folio-icon">${icon}</span>
+        <span class="folio-name">${escapeHtml(name)}</span>
+        <span class="folio-chevron">▸</span>
+      </div>
+      <div class="folio-body">${bodyHtml}</div>
+    </div>
+  `;
+}
+function toggleFolio(id){
+  document.getElementById(id).classList.toggle('open');
+}
+
+function copyResultAsText(){
+  if (!currentDoc) return;
+  const out = `■ ${currentDoc.title}\n(${PROVIDER_LABELS[currentDoc.provider]||''})\n\n${currentDoc.rawText}`;
+  navigator.clipboard.writeText(out).then(() => showToast('클립보드에 복사되었습니다'));
+}
+</script>
+</body>
+</html>
