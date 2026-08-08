@@ -388,13 +388,23 @@ textarea.prompt-area{ min-height:180px; font-size:13px; }
 .script-block.type-bgm{ background:rgba(90,120,180,0.22); }
 .script-block.type-handout{ background:rgba(170,120,60,0.22); }
 .script-block.type-kp{ background:rgba(80,150,100,0.22); }
+.script-block.type-heading{ background:rgba(92,156,124,0.16); font-weight:700; font-family:var(--font-display); }
+.script-block.type-skill{ background:rgba(181,88,63,0.28); font-weight:700; }
+.script-block.type-skill-result{ background:rgba(181,88,63,0.10); }
+.script-block.type-annot-label{ background:rgba(140,140,150,0.30); font-weight:700; }
+.script-block.type-annot{ background:rgba(140,140,150,0.14); }
+.script-block.type-dialogue{ background:rgba(150,120,180,0.16); }
+.block-speaker{ font-size:11.5px; color:var(--verdigris); font-weight:700; margin-bottom:3px; }
+.block-type-select{
+  background:var(--elevated); border:1px solid var(--hairline); color:var(--parchment-dim);
+  font-size:11px; border-radius:5px; padding:2px 4px; cursor:pointer;
+}
 .block-text{ outline:none; word-break:break-word; }
 .block-text[contenteditable="true"]{ border-bottom:1px dashed var(--verdigris-dim); }
 .block-actions{
-  display:flex; gap:10px; margin-top:6px; opacity:0; transition:opacity 0.12s;
+  display:flex; gap:10px; align-items:center; margin-top:6px;
   font-size:11.5px;
 }
-.script-block:hover .block-actions{ opacity:1; }
 .block-actions span{ color:var(--muted); cursor:pointer; }
 .block-actions span:hover{ color:var(--verdigris); }
 .block-actions .del-action:hover{ color:var(--rust); }
@@ -1254,7 +1264,7 @@ function substituteNames(text, kpcName, pcName){
 /* ============================================================
    스크립트 정리 — PDF 줄바꿈 보정
 ============================================================ */
-const DEFAULT_SCRIPT_MARKERS = "■\nŸ\nü\n▶\n◆\n◇\n●\n○\n※\nv \nQ.\nA.";
+const DEFAULT_SCRIPT_MARKERS = "■\nŸ\nü\n▶\n◆\n◇\n●\n○\n※\n✷\nv \nQ.\nA.";
 // 이 패턴으로 "시작"하는 줄은 공백 없이 앞 문단에 접합 (한글 문장 어미/조사 계열 — 단어 중간 줄바꿈 복원용)
 const GLUE_NO_SPACE_RE = /^(니다|습니다|ㅂ니다|니까|습니까|는데요|던데요|의)(?=[\s.!?,)"'’”]|$)/;
 
@@ -1265,7 +1275,7 @@ function loadScriptMarkers(){
 }
 
 function buildHeadingRegex(markersText){
-  const generic = '(?:[0-9]+\\s*\\.|[0-9]+\\s*(?:ST|ND|RD|TH)\\s*\\.)';
+  const generic = '(?:[0-9]+-[0-9]+\\s*\\.|[0-9]+\\s*\\.|[0-9]+\\s*(?:ST|ND|RD|TH)\\s*\\.)';
   const custom = (markersText || '')
     .split('\n').map(s => s.trim()).filter(Boolean).map(escapeRegExp);
   return new RegExp('^(' + [generic, ...custom].join('|') + ')');
@@ -1318,27 +1328,99 @@ function classifyBlock(text){
   return 'normal';
 }
 
-function processParagraph(paragraph, commaSplit){
-  const handoutIdx = paragraph.indexOf('핸드아웃');
-  const kpMatch = paragraph.match(/KP(?![A-Za-z])/);
-  const kpIdx = kpMatch ? kpMatch.index : -1;
-  if (handoutIdx !== -1 || kpIdx !== -1){
-    const isKpFirst = kpIdx !== -1 && (handoutIdx === -1 || kpIdx < handoutIdx);
-    return [{ text: paragraph, type: isKpFirst ? 'kp' : 'handout' }];
-  }
-  return splitIntoSentences(paragraph, commaSplit).map(s => ({ text: s, type: classifyBlock(s) }));
+// CoC 7판 공식 기술(스킬) 목록 — 판정 라벨 자동 인식용
+const SKILL_LIST = [
+  '회계','인류학','감정','고고학','예술/공예','매혹','등반','신용','크툴루 신화','변장','회피',
+  '운전(자동차)','전기수리','화술','근접전(격투)','사격(권총)','사격(라이플/샷건)','사격(기관총)',
+  '사격(활)','사격(중화기)','응급처치','역사','위협','도약','모국어','타언어','법률','도서관 이용',
+  '듣기','열쇠공학','기계수리','의학','자연','항법','오컬트','중장비 조작','설득','조종','정신분석',
+  '심리학','승마','과학','손재주','관찰력','잠복','생존','수영','던지기','추적','항해','잠수'
+];
+const ANNOT_LABEL_WORDS = ['annot','Annot','ANNOT','키퍼노트','키퍼 노트','GM노트','GM 노트','진행 팁'];
+
+function matchSkillLabel(p){
+  const t = p.trim();
+  if (!t || t.length > 14 || /[.!?…。]/.test(t)) return null;
+  const bare = t.replace(/\(.*?\)/g, '').split('/')[0].trim();
+  return (SKILL_LIST.includes(bare) || SKILL_LIST.includes(t.replace(/\(.*?\)/g,'').trim())) ? t : null;
+}
+function matchAnnotLabel(p){
+  const t = p.trim();
+  return ANNOT_LABEL_WORDS.includes(t) ? t : null;
+}
+function matchDialogue(p){
+  const t = p.trim();
+  let m = t.match(/^([가-힣A-Za-z·]{1,10}(?:\s[가-힣A-Za-z·]{1,10}){0,2})\s*[“"]/);
+  if (m && m[1].length <= 12) return { speaker: m[1].trim() };
+  if (/^[“"]/.test(t)) return { speaker: null };
+  return null;
+}
+// 마커+짧은 제목이 본문과 한 줄에 붙어 나오는 경우, 제목만 잘라낸다 (예: "▶ 단상 사역자들이...")
+function splitHeadingPrefix(p, HEADING_RE){
+  if (!HEADING_RE.test(p)) return null;
+  const PREFIX_RE = /^([■Ÿü▶◆◇●○※✷]\s*(?:[0-9]+(?:-[0-9]+)?\s*\.)?\s*|[0-9]+(?:-[0-9]+)?\s*\.\s*)([가-힣A-Za-z0-9:·][가-힣A-Za-z0-9:·]{0,9})(?=\s|$)/;
+  const m = p.match(PREFIX_RE);
+  if (!m) return { heading: p.trim(), rest: '' };
+  return { heading: (m[1] + m[2]).trim(), rest: p.slice(m[0].length).trim() };
+}
+
+function classifyParagraphs(paragraphs, commaSplit){
+  const HEADING_RE = buildHeadingRegex(loadScriptMarkers());
+  const blocks = [];
+  let pending = null; // 직전 줄이 '판정'/'Annot' 라벨이었는지 여부
+
+  paragraphs.forEach(p => {
+    const handoutIdx = p.indexOf('핸드아웃');
+    const kpMatch = p.match(/KP(?![A-Za-z])/);
+    const kpIdx = kpMatch ? kpMatch.index : -1;
+    if (handoutIdx !== -1 || kpIdx !== -1){
+      const isKpFirst = kpIdx !== -1 && (handoutIdx === -1 || kpIdx < handoutIdx);
+      blocks.push({ text: p, type: isKpFirst ? 'kp' : 'handout' });
+      pending = null; return;
+    }
+
+    if (HEADING_RE.test(p)){
+      const split = splitHeadingPrefix(p, HEADING_RE);
+      blocks.push({ text: split.heading, type: 'heading' });
+      if (split.rest){
+        splitIntoSentences(split.rest, commaSplit).forEach(s => blocks.push({ text: s, type: classifyBlock(s) }));
+      }
+      pending = null; return;
+    }
+
+    if (matchAnnotLabel(p)){
+      blocks.push({ text: p, type: 'annot-label' });
+      pending = 'annot'; return;
+    }
+    if (matchSkillLabel(p)){
+      blocks.push({ text: p, type: 'skill' });
+      pending = 'skill'; return;
+    }
+    if (pending){
+      const t = pending === 'annot' ? 'annot' : 'skill-result';
+      splitIntoSentences(p, commaSplit).forEach(s => blocks.push({ text: s, type: t }));
+      pending = null; return;
+    }
+
+    const dlg = matchDialogue(p);
+    if (dlg){
+      blocks.push({ text: p, type: 'dialogue', speaker: dlg.speaker || null });
+      pending = null; return;
+    }
+
+    splitIntoSentences(p, commaSplit).forEach(s => blocks.push({ text: s, type: classifyBlock(s) }));
+    pending = null;
+  });
+
+  return blocks;
 }
 
 function convertScript(rawText, kpcName, pcName, commaSplit, pdfRepair){
   const paragraphs = pdfRepair
     ? repairPdfLineWraps(rawText, loadScriptMarkers())
     : rawText.replace(/\r\n/g, '\n').split('\n').map(p => p.trim()).filter(Boolean);
-  const blocks = [];
-  paragraphs.forEach(p => {
-    const substituted = substituteNames(p, kpcName, pcName);
-    blocks.push(...processParagraph(substituted, commaSplit));
-  });
-  return blocks;
+  const substituted = paragraphs.map(p => substituteNames(p, kpcName, pcName));
+  return classifyParagraphs(substituted, commaSplit);
 }
 
 /* ============================================================
@@ -1469,16 +1551,34 @@ function renderScriptResultView(record){
   `;
 }
 
+const BLOCK_TYPE_LABELS = {
+  normal: '지문', bgm: 'BGM', handout: '핸드아웃', kp: 'KP정보',
+  heading: '장면제목', skill: '판정', 'skill-result': '판정결과',
+  'annot-label': 'Annot', annot: 'Annot내용', dialogue: '대사'
+};
+
 function scriptBlockHtml(block, idx){
+  const speakerHtml = block.speaker ? `<div class="block-speaker">${escapeHtml(block.speaker)}</div>` : '';
+  const options = Object.entries(BLOCK_TYPE_LABELS)
+    .map(([val, label]) => `<option value="${val}" ${block.type === val ? 'selected' : ''}>${label}</option>`)
+    .join('');
   return `
     <div class="script-block type-${block.type}" data-idx="${idx}">
+      ${speakerHtml}
       <div class="block-text" id="blockText_${idx}">${escapeHtml(block.text)}</div>
       <div class="block-actions">
         <span onclick="editBlock(${idx})">수정</span>
         <span class="del-action" onclick="deleteBlock(${idx})">삭제</span>
+        <select class="block-type-select" onchange="changeBlockType(${idx}, this.value)">${options}</select>
       </div>
     </div>
   `;
+}
+
+function changeBlockType(idx, newType){
+  if (!currentDoc || !currentDoc.blocks) return;
+  currentDoc.blocks[idx].type = newType;
+  dbPut(currentDoc).then(() => renderScriptResultView(currentDoc));
 }
 
 function editBlock(idx){
