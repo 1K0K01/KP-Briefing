@@ -848,28 +848,89 @@ function selectProviderPill(provider){
   renderIntakeView();
 }
 
+/* ============================================================
+   PDF 텍스트 추출 — 좌표(줄/문단) 기반 재구성
+   pdf.js 텍스트 아이템의 y좌표로 같은 줄을 묶고, 줄 간격을
+   페이지 내 중앙값과 비교해 실제 문단 구분과 단순 줄바꿈을 구별한다.
+============================================================ */
+async function extractPdfPageText(page){
+  const content = await page.getTextContent();
+  const items = content.items.filter(it => it.str !== undefined);
+  if (!items.length) return '';
+
+  const Y_TOL = 2;
+  const lines = [];
+  let curLine = null;
+  for (const it of items){
+    const y = it.transform[5];
+    if (!curLine || Math.abs(curLine.y - y) > Y_TOL){
+      curLine = { y, items: [] };
+      lines.push(curLine);
+    }
+    curLine.items.push(it.str);
+  }
+
+  const lineTexts = lines
+    .map(line => ({ y: line.y, text: line.items.join('').replace(/\s+/g, ' ').trim() }))
+    .filter(l => l.text !== '');
+  if (!lineTexts.length) return '';
+
+  const gaps = [];
+  for (let i = 1; i < lineTexts.length; i++){
+    const g = lineTexts[i-1].y - lineTexts[i].y;
+    if (g > 0) gaps.push(g);
+  }
+  gaps.sort((a,b) => a - b);
+  const median = gaps.length ? gaps[Math.floor(gaps.length/2)] : 15;
+
+  let out = '';
+  let prev = null;
+  for (const line of lineTexts){
+    if (prev === null){
+      out += line.text;
+    } else {
+      const gap = prev.y - line.y;
+      if (gap <= 0 || gap > median * 1.6){
+        out += '\n\n' + line.text;
+      } else {
+        out += ' ' + line.text;
+      }
+    }
+    prev = line;
+  }
+  return out.replace(/\n{3,}/g, '\n\n').replace(/ {2,}/g, ' ').trim();
+}
+
+async function extractPdfText(file, onProgress){
+  pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  const buf = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+  const pageTexts = [];
+  for (let i = 1; i <= pdf.numPages; i++){
+    if (onProgress) onProgress(i, pdf.numPages);
+    const page = await pdf.getPage(i);
+    pageTexts.push(await extractPdfPageText(page));
+  }
+  return { text: pageTexts.filter(Boolean).join('\n\n'), numPages: pdf.numPages };
+}
+
 async function handlePdfUpload(e){
   const file = e.target.files[0];
   if (!file) return;
-  document.getElementById('pdfFileName').textContent = `추출 중... (${file.name})`;
+  const nameEl = document.getElementById('pdfFileName');
+  nameEl.textContent = `추출 중... (${file.name})`;
   try {
-    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-    const buf = await file.arrayBuffer();
-    const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
-    let text = '';
-    for (let i = 1; i <= pdf.numPages; i++){
-      const page = await pdf.getPage(i);
-      const content = await page.getTextContent();
-      text += content.items.map(it => it.str).join(' ') + '\n\n';
-    }
-    document.getElementById('scenarioText').value = text.trim();
-    document.getElementById('pdfFileName').textContent = `✓ ${file.name} (${pdf.numPages}페이지 추출 완료)`;
+    const { text, numPages } = await extractPdfText(file, (i, total) => {
+      nameEl.textContent = `추출 중... (${file.name}) ${i}/${total}페이지`;
+    });
+    document.getElementById('scenarioText').value = text;
+    nameEl.textContent = `✓ ${file.name} (${numPages}페이지 추출 완료)`;
     if (!document.getElementById('titleInput').value){
       document.getElementById('titleInput').value = file.name.replace(/\.pdf$/i, '');
     }
   } catch (err){
     console.error(err);
-    document.getElementById('pdfFileName').textContent = '추출 실패 — 본문을 직접 붙여넣어 주세요';
+    nameEl.textContent = '추출 실패 — 본문을 직접 붙여넣어 주세요';
   }
 }
 
@@ -1259,7 +1320,8 @@ function classifyBlock(text){
 
 function processParagraph(paragraph, commaSplit){
   const handoutIdx = paragraph.indexOf('핸드아웃');
-  const kpIdx = paragraph.indexOf('KP');
+  const kpMatch = paragraph.match(/KP(?![A-Za-z])/);
+  const kpIdx = kpMatch ? kpMatch.index : -1;
   if (handoutIdx !== -1 || kpIdx !== -1){
     const isKpFirst = kpIdx !== -1 && (handoutIdx === -1 || kpIdx < handoutIdx);
     return [{ text: paragraph, type: isKpFirst ? 'kp' : 'handout' }];
@@ -1325,7 +1387,7 @@ function renderScriptIntakeView(){
         <label class="opt-check"><input type="checkbox" id="scriptCommaSplit"> 쉼표 단위 문장 분리</label>
         <label class="opt-check"><input type="checkbox" id="scriptPdfRepair" checked> PDF 줄바꿈 보정</label>
       </div>
-      <div class="hint" style="margin:-10px 0 16px;">PDF에서 복사한 텍스트는 화면에 보이는 줄마다 줄바꿈이 섞여 들어가는 경우가 많아요. 이 옵션을 켜두면 문장이 끝나지 않은 줄은 자동으로 이어 붙입니다.</div>
+      <div class="hint" style="margin:-10px 0 16px;">PDF를 파일로 업로드하면 자동으로 문단이 정리돼요. 이 옵션은 텍스트를 직접 복사해서 붙여넣었을 때(줄바꿈이 뒤섞여 들어올 때) 보조로 씁니다.</div>
 
       <div class="btn-row">
         <button class="ghost-btn" onclick="renderScriptIntakeView()">초기화</button>
@@ -1338,25 +1400,20 @@ function renderScriptIntakeView(){
 async function handleScriptPdfUpload(e){
   const file = e.target.files[0];
   if (!file) return;
-  document.getElementById('scriptPdfFileName').textContent = `추출 중... (${file.name})`;
+  const nameEl = document.getElementById('scriptPdfFileName');
+  nameEl.textContent = `추출 중... (${file.name})`;
   try {
-    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-    const buf = await file.arrayBuffer();
-    const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
-    let text = '';
-    for (let i = 1; i <= pdf.numPages; i++){
-      const page = await pdf.getPage(i);
-      const content = await page.getTextContent();
-      text += content.items.map(it => it.str).join('\n') + '\n\n';
-    }
-    document.getElementById('scriptRawInput').value = text.trim();
-    document.getElementById('scriptPdfFileName').textContent = `✓ ${file.name} (${pdf.numPages}페이지 추출 완료)`;
+    const { text, numPages } = await extractPdfText(file, (i, total) => {
+      nameEl.textContent = `추출 중... (${file.name}) ${i}/${total}페이지`;
+    });
+    document.getElementById('scriptRawInput').value = text;
+    nameEl.textContent = `✓ ${file.name} (${numPages}페이지 추출 완료)`;
     if (!document.getElementById('scriptTitleInput').value){
       document.getElementById('scriptTitleInput').value = file.name.replace(/\.pdf$/i, '');
     }
   } catch (err){
     console.error(err);
-    document.getElementById('scriptPdfFileName').textContent = '추출 실패 — 본문을 직접 붙여넣어 주세요';
+    nameEl.textContent = '추출 실패 — 본문을 직접 붙여넣어 주세요';
   }
 }
 
