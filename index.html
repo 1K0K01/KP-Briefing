@@ -318,6 +318,7 @@ textarea.prompt-area{ min-height:180px; font-size:13px; }
   display:flex; align-items:center; justify-content:center; z-index:100;
   padding:20px;
 }
+.hidden{ display:none !important; }
 .modal-overlay.hidden{ display:none; }
 .modal-box{
   background:var(--panel);
@@ -410,6 +411,36 @@ textarea.prompt-area{ min-height:180px; font-size:13px; }
 .block-actions .del-action:hover{ color:var(--rust); }
 .script-empty{ color:var(--muted); text-align:center; padding:30px; font-size:13px; }
 
+.multi-grid{ display:grid; grid-template-columns:repeat(2,1fr); gap:12px; margin-bottom:16px; }
+@media (min-width:600px){ .multi-grid{ grid-template-columns:repeat(4,1fr); } }
+.multi-grid .field-label{ margin-bottom:4px; }
+
+.stats-row{ display:flex; gap:8px; flex-wrap:wrap; margin-bottom:14px; }
+.stats-pill{
+  background:var(--elevated); border:1px solid var(--hairline); color:var(--parchment-dim);
+  padding:6px 12px; border-radius:20px; font-size:12px;
+}
+
+.link-card{ border:1px solid var(--hairline); border-radius:10px; padding:14px 16px; margin-bottom:14px; background:var(--panel); }
+.link-card-head{ display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; }
+.link-card-head .field-label{ margin:0; }
+.link-row{
+  display:flex; justify-content:space-between; align-items:center; gap:8px;
+  background:var(--elevated); border:1px solid var(--hairline); border-radius:6px;
+  padding:8px 10px; margin-bottom:6px; font-size:12.5px;
+}
+.link-row a{ color:var(--verdigris); text-decoration:none; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:75%; }
+
+.script-block.playable{ cursor:pointer; }
+.script-block.play-current{ box-shadow:inset 0 0 0 2px var(--verdigris); background:rgba(92,156,124,0.16); }
+.script-block.type-dialogue{ background:rgba(150,120,180,0.16); }
+#floatingNextBtn{
+  position:fixed; bottom:22px; right:18px; z-index:60;
+  background:var(--verdigris); color:#0f1310; border:none; font-weight:700;
+  padding:12px 18px; border-radius:10px; font-size:13px; cursor:pointer;
+  box-shadow:0 4px 14px rgba(0,0,0,0.35);
+}
+
 @media (max-width: 760px){
   #sidebar{ position:fixed; z-index:50; transform:translateX(-100%); }
   #sidebar.open{ transform:translateX(0); }
@@ -490,6 +521,19 @@ textarea.prompt-area{ min-height:180px; font-size:13px; }
     <div class="modal-actions">
       <button class="ghost-btn" onclick="closeSettings()">닫기</button>
       <button class="primary-btn" onclick="saveSettings()">저장</button>
+    </div>
+  </div>
+</div>
+
+<div id="scriptPasswordModal" class="modal-overlay hidden">
+  <div class="modal-box" style="width:340px;">
+    <h3>🔒 스크립트 정리</h3>
+    <div class="modal-sub">암호를 입력하면 이 브라우저에서는 다시 묻지 않습니다.</div>
+    <input type="password" id="scriptPasswordInput" class="field-gap" placeholder="암호" onkeydown="if(event.key==='Enter') submitScriptPassword()">
+    <div class="test-result" id="scriptPasswordResult"></div>
+    <div class="modal-actions">
+      <button class="ghost-btn" onclick="closeScriptPasswordModal()">취소</button>
+      <button class="primary-btn" onclick="submitScriptPassword()">확인</button>
     </div>
   </div>
 </div>
@@ -658,10 +702,22 @@ async function loadAnalysis(id){
   const items = await dbGetAll();
   const item = items.find(i => i.id === id);
   if (!item) return;
+  if (item.type === 'script'){
+    requireScriptUnlock(() => openScriptRecord(item));
+    return;
+  }
   currentDoc = item;
-  if (item.type === 'script') renderScriptResultView(item);
-  else renderResultView(item);
+  cleanupScriptPlayMode();
+  renderResultView(item);
   await refreshHistory();
+  closeSidebarOnMobile();
+}
+
+function openScriptRecord(item){
+  currentDoc = item;
+  cleanupScriptPlayMode();
+  renderScriptResultView(item);
+  refreshHistory();
   closeSidebarOnMobile();
 }
 
@@ -677,14 +733,71 @@ async function deleteAnalysis(id){
 
 function startNewAnalysis(){
   currentDoc = null;
+  cleanupScriptPlayMode();
   renderIntakeView();
   closeSidebarOnMobile();
 }
 
 function startNewScript(){
-  currentDoc = null;
-  renderScriptIntakeView();
-  closeSidebarOnMobile();
+  requireScriptUnlock(() => {
+    currentDoc = null;
+    cleanupScriptPlayMode();
+    renderScriptIntakeView();
+    closeSidebarOnMobile();
+  });
+}
+
+function cleanupScriptPlayMode(){
+  scriptPlayModeActive = false;
+  scriptPlayIndex = 0;
+  scriptPlayableBlocks = [];
+  const floatBtn = document.getElementById('floatingNextBtn');
+  if (floatBtn) floatBtn.remove();
+}
+
+/* ============================================================
+   스크립트 정리 — 암호 게이트
+   비밀번호 원문은 코드 어디에도 저장하지 않고 SHA-256 해시만 비교한다.
+============================================================ */
+const SCRIPT_PASSWORD_HASH = '4d4bfac08d0bfdf33089104409b8d59289cfd7d22ca325c4a20584a73ca35759';
+let scriptUnlocked = localStorage.getItem('kb_script_unlocked') === 'true';
+let pendingScriptAction = null;
+
+async function sha256Hex(str){
+  const enc = new TextEncoder().encode(str);
+  const buf = await crypto.subtle.digest('SHA-256', enc);
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+function requireScriptUnlock(action){
+  if (scriptUnlocked){ action(); return; }
+  pendingScriptAction = action;
+  document.getElementById('scriptPasswordInput').value = '';
+  document.getElementById('scriptPasswordResult').textContent = '';
+  document.getElementById('scriptPasswordModal').classList.remove('hidden');
+  setTimeout(() => document.getElementById('scriptPasswordInput').focus(), 50);
+}
+
+function closeScriptPasswordModal(){
+  document.getElementById('scriptPasswordModal').classList.add('hidden');
+  pendingScriptAction = null;
+}
+
+async function submitScriptPassword(){
+  const val = document.getElementById('scriptPasswordInput').value;
+  const hash = await sha256Hex(val);
+  const resultEl = document.getElementById('scriptPasswordResult');
+  if (hash === SCRIPT_PASSWORD_HASH){
+    scriptUnlocked = true;
+    localStorage.setItem('kb_script_unlocked', 'true');
+    document.getElementById('scriptPasswordModal').classList.add('hidden');
+    const action = pendingScriptAction;
+    pendingScriptAction = null;
+    if (action) action();
+  } else {
+    resultEl.className = 'test-result fail';
+    resultEl.textContent = '✕ 암호가 올바르지 않습니다';
+  }
 }
 
 
@@ -1300,33 +1413,57 @@ function particleRo(word){
   if (jong === 0 || jong === 8) return '로'; // 받침 없음 또는 ㄹ받침
   return '으로';
 }
-const PARTICLE_PAIRS = {
-  '은':['은','는'], '는':['은','는'],
-  '이':['이','가'], '가':['이','가'],
-  '을':['을','를'], '를':['을','를'],
-  '과':['과','와'], '와':['과','와']
-};
-function correctParticle(original, replacementWord){
-  const pair = PARTICLE_PAIRS[original];
-  if (!pair) return original;
-  return hasBatchim(replacementWord) ? pair[0] : pair[1];
+// 이름 치환 후 그 이름 뒤에 붙는 조사를 받침 유무에 맞게 고쳐준다 (이/가, 은/는, 을/를, 과/와, 이랑/랑, 으로/로)
+function fixKoreanJosa(text, name){
+  if (!name) return text;
+  const batchim = hasBatchim(name);
+  const josaPairs = [
+    { pattern: /(?:\(이\)?가|이\(가\)|이\/가|이|가)/, yes: '이', no: '가' },
+    { pattern: /(?:\(은\)?는|은\(는\)|은\/는|은|는)/, yes: '은', no: '는' },
+    { pattern: /(?:\(을\)?를|을\(를\)|을\/를|을|를)/, yes: '을', no: '를' },
+    { pattern: /(?:\(과\)?와|과\(와\)|과\/와|과|와)/, yes: '과', no: '와' },
+    { pattern: /(?:\(이\)?랑|이\(랑\)|이\/랑|이랑|랑)/, yes: '이랑', no: '랑' },
+    { pattern: /(?:\(으\)?로|으\(로\)|으\/로|으로|로)/, yes: '으로', no: '로' }
+  ];
+  let fixed = text;
+  josaPairs.forEach(pair => {
+    const escapedName = escapeRegExp(name);
+    // (?![가-힣]) : 뒤에 한글이 더 이어지면(=긴 단어의 일부) 조사로 보지 않고 건너뜀
+    const regex = new RegExp(escapedName + '\\s*(?:' + pair.pattern.source + ')(?![가-힣])', 'g');
+    fixed = fixed.replace(regex, () => name + (batchim ? pair.yes : pair.no));
+  });
+  return fixed;
 }
 
 /* ============================================================
    스크립트 정리 — 이름 치환 (KPC / PC / 탐사자 → 실제 이름, 조사 자동보정)
 ============================================================ */
 function substituteNames(text, kpcName, pcName){
-  const tokens = [
-    { re: /KPC(은|는|이|가|을|를|과|와)?/g, name: kpcName },
-    { re: /(?:PC|탐사자)(은|는|이|가|을|를|과|와)?/g, name: pcName }
+  let out = text;
+  if (kpcName){
+    out = out.split('KPC').join(kpcName);
+    out = fixKoreanJosa(out, kpcName);
+  }
+  if (pcName){
+    out = out.replace(/탐사자|PC/g, pcName);
+    out = fixKoreanJosa(out, pcName);
+  }
+  return out;
+}
+
+// 다인 모드: HO1~HO4 슬롯별 이름 치환
+function substituteMultiNames(text, names){
+  const targets = [
+    { name: names.ho1, keywords: ['HO1','ho1','Ho1','핸드아웃1','PC1','pc1','탐사자1'] },
+    { name: names.ho2, keywords: ['HO2','ho2','Ho2','핸드아웃2','PC2','pc2','탐사자2'] },
+    { name: names.ho3, keywords: ['HO3','ho3','Ho3','핸드아웃3','PC3','pc3','탐사자3'] },
+    { name: names.ho4, keywords: ['HO4','ho4','Ho4','핸드아웃4','PC4','pc4','탐사자4'] }
   ];
   let out = text;
-  tokens.forEach(({re, name}) => {
-    if (!name) return;
-    out = out.replace(re, (match, particle) => {
-      if (!particle) return name;
-      return name + correctParticle(particle, name);
-    });
+  targets.forEach(t => {
+    if (!t.name) return;
+    t.keywords.forEach(k => { out = out.split(k).join(t.name); });
+    out = fixKoreanJosa(out, t.name);
   });
   return out;
 }
@@ -1351,6 +1488,9 @@ function buildHeadingRegex(markersText){
   return new RegExp('^(' + [generic, ...custom].join('|') + ')');
 }
 
+// KP/핸드아웃/링크류 줄은 문단 병합 대상에서 미리 빼둔다 (문장부호 없이 끝나도 다음 줄에 안 붙게)
+const SPECIAL_LINE_RE = /키퍼|KP|kp|핸드아웃|비밀번호|Handout|http|bgm|브금/i;
+
 function repairPdfLineWraps(text, markersText){
   const HEADING_RE = buildHeadingRegex(markersText);
   const cleaned = text.replace(/\f/g, '\n'); // 페이지 나눔 문자 제거
@@ -1364,7 +1504,7 @@ function repairPdfLineWraps(text, markersText){
       if (buffer){ paragraphs.push(buffer); buffer = ''; }
       continue;
     }
-    if (HEADING_RE.test(line)){
+    if (HEADING_RE.test(line) || SPECIAL_LINE_RE.test(line)){
       if (buffer){ paragraphs.push(buffer); buffer = ''; }
       paragraphs.push(line);
       continue;
@@ -1386,16 +1526,86 @@ function repairPdfLineWraps(text, markersText){
 }
 
 /* ============================================================
-   스크립트 정리 — 문장 분리 & 블록 분류
+   스크립트 정리 — 문장 분리 & 블록 분류 (인용부호/괄호 보호 적용)
 ============================================================ */
+// 따옴표/괄호/꺾쇠 안쪽 내용을 임시 토큰으로 감춰서, 그 안의 쉼표·마침표가
+// 문장/쉼표 분리 로직에 영향받지 않게 한다.
+function protectQuotedSegments(text){
+  const store = [];
+  let out = text.replace(/(\d+)\./g, '$1\u0004'); // "1." 같은 번호매김/소수점 보호
+  const patterns = [
+    /“[^”]*”/g, /"[^"\n]*"/g, /‘[^’]*’/g, /'[^'\n]*'/g,
+    /\[\[[^\]]*\]\]/g, /\([^)]*\)/g, /\[[^\]]*\]/g,
+    /「[^」]*」/g, /『[^』]*』/g, /<[^>]*>/g
+  ];
+  patterns.forEach(pattern => {
+    out = out.replace(pattern, (match) => {
+      store.push(match);
+      return `\u0002_${store.length - 1}_\u0002`;
+    });
+  });
+  return { text: out, store };
+}
+function restoreProtected(text, store){
+  let out = text.replace(/\u0004/g, '.');
+  for (let i = store.length - 1; i >= 0; i--){
+    out = out.split(`\u0002_${i}_\u0002`).join(store[i]);
+  }
+  return out;
+}
+
 function splitIntoSentences(paragraph, commaSplit){
-  const pattern = commaSplit ? /(?<=[.!?…。,，])\s+/ : /(?<=[.!?…。])\s+/;
-  return paragraph.split(pattern).map(s => s.trim()).filter(Boolean);
+  const { text: protectedText, store } = protectQuotedSegments(paragraph);
+  const rawSegments = protectedText
+    .replace(/([.!?。．…⋯]+(?:\u0002_\d+_\u0002)?)/g, '$1\u0007')
+    .split('\u0007')
+    .map(s => s.trim())
+    .filter(Boolean);
+
+  if (!commaSplit){
+    return rawSegments.map(s => restoreProtected(s, store).trim()).filter(Boolean);
+  }
+
+  const result = [];
+  rawSegments.forEach(sentence => {
+    const tokens = sentence.split(/([,、])/);
+    let chunk = '', checkSoFar = '';
+    for (let i = 0; i < tokens.length; i++){
+      const token = tokens[i];
+      if (!token) continue;
+      if (token === ',' || token === '、'){
+        const checkStr = restoreProtected(checkSoFar, store).trim();
+        const nextStr = restoreProtected(tokens.slice(i + 1).join(''), store).trim();
+        if (checkStr.length >= 8 && nextStr.length >= 8){
+          const finalChunk = restoreProtected(chunk, store).trim();
+          if (finalChunk) result.push(finalChunk + token);
+          chunk = ''; checkSoFar = '';
+        } else {
+          chunk += token;
+        }
+        checkSoFar += token;
+      } else {
+        chunk += token; checkSoFar += token;
+      }
+    }
+    if (chunk.trim()){
+      const finalChunk = restoreProtected(chunk, store).trim();
+      if (finalChunk) result.push(finalChunk);
+    }
+  });
+  return result;
 }
 
 function classifyBlock(text){
-  if (/BGM|https?:\/\/|www\./i.test(text)) return 'bgm';
+  if (/BGM|브금|https?:\/\/|www\./i.test(text)) return 'bgm';
   return 'normal';
+}
+
+// PDF/OCR 추출 시 조사 앞에 잘못 낀 공백을 흡수 ("학교 는" → "학교는")
+// '하며'/'이'는 일부러 제외함 — "조용히 하며", "이 세계" 같은 정상 띄어쓰기까지
+// 잘못 붙여버리는 부작용이 있었음.
+function absorbStrayJosaSpace(text){
+  return text.replace(/([가-힣])\s+(가|은|는|을|를|과|와|의|에|에서|고|라고|했습니다|입니다|였다|였습니다)(\s|[,.!?\n]|$)/g, '$1$2$3');
 }
 
 // CoC 7판 공식 기술(스킬) 목록 — 판정 라벨 자동 인식용
@@ -1440,7 +1650,7 @@ function classifyParagraphs(paragraphs, commaSplit){
   let pending = null; // 직전 줄이 '판정'/'Annot' 라벨이었는지 여부
 
   paragraphs.forEach(p => {
-    const handoutIdx = p.indexOf('핸드아웃');
+    const handoutIdx = p.search(/핸드아웃|비밀번호|Handout/i);
     const kpMatch = p.match(/KP(?![A-Za-z])/);
     const kpIdx = kpMatch ? kpMatch.index : -1;
     if (handoutIdx !== -1 || kpIdx !== -1){
@@ -1462,6 +1672,11 @@ function classifyParagraphs(paragraphs, commaSplit){
       blocks.push({ text: p, type: 'annot-label' });
       pending = 'annot'; return;
     }
+    // 줄 안에 "판정"이라는 글자가 그대로 있으면(예: "관찰력 판정") 그 자체로 완결된 판정 블록
+    if (p.includes('판정')){
+      blocks.push({ text: p, type: 'skill' });
+      pending = null; return;
+    }
     if (matchSkillLabel(p)){
       blocks.push({ text: p, type: 'skill' });
       pending = 'skill'; return;
@@ -1482,36 +1697,55 @@ function classifyParagraphs(paragraphs, commaSplit){
     pending = null;
   });
 
+  blocks.forEach(b => { b.text = absorbStrayJosaSpace(b.text); });
   return blocks;
 }
 
-function convertScript(rawText, kpcName, pcName, commaSplit, pdfRepair){
+function applyDescPrefix(blocks, descMode){
+  if (!descMode) return blocks;
+  const NARRATION_TYPES = { normal: 1, heading: 1 };
+  blocks.forEach(b => {
+    if (NARRATION_TYPES[b.type] && !b.text.startsWith('/desc ')){
+      b.text = '/desc ' + b.text;
+    }
+  });
+  return blocks;
+}
+
+function convertScript(rawText, names, commaSplit, pdfRepair, descMode){
   const paragraphs = pdfRepair
     ? repairPdfLineWraps(rawText, loadScriptMarkers())
     : rawText.replace(/\r\n/g, '\n').split('\n').map(p => p.trim()).filter(Boolean);
-  const substituted = paragraphs.map(p => substituteNames(p, kpcName, pcName));
-  return classifyParagraphs(substituted, commaSplit);
+  const substituted = paragraphs.map(p => {
+    let out = names.mode === 'multi' ? substituteMultiNames(p, names) : substituteNames(p, names.kpc, names.pc);
+    return out;
+  });
+  const blocks = classifyParagraphs(substituted, commaSplit);
+  return applyDescPrefix(blocks, descMode);
 }
 
 /* ============================================================
    뷰: 스크립트 정리 입력 화면
 ============================================================ */
+let scriptMode = 'tyeman';
+
 function renderScriptIntakeView(){
+  scriptMode = 'tyeman';
   const content = document.getElementById('content');
   content.innerHTML = `
     <div class="card">
       <div class="section-title">스크립트 정리</div>
-      <div class="section-desc">타이만 대사 원고를 붙여넣거나 PDF로 업로드하면 KPC/PC 이름 치환, 문장 분리, 핸드아웃·KP정보·BGM 블록 인식까지 자동으로 정리해드립니다.</div>
+      <div class="section-desc">대사 원고를 붙여넣거나 PDF로 업로드하면 이름 치환, 문장 분리, 핸드아웃·KP정보·판정·대사 블록 인식까지 자동으로 정리해드립니다.</div>
 
       <div class="mode-tabs">
-        <div class="mode-tab active">타이만 모드 (1:1)</div>
-        <div class="mode-tab" onclick="showToast('다인 모드는 준비 중입니다')" style="opacity:0.5;">다인 모드 (Multi)</div>
+        <div class="mode-tab active" id="tabTyeman" onclick="switchScriptMode('tyeman')">타이만 모드 (1:1)</div>
+        <div class="mode-tab" id="tabMulti" onclick="switchScriptMode('multi')">다인 모드</div>
       </div>
 
       <label class="field-label">스크립트 제목</label>
       <input type="text" id="scriptTitleInput" class="field-gap" placeholder="스크립트 제목을 입력하세요">
 
-      <div class="name-row">
+      <div id="panelTyeman" class="name-row">
         <div>
           <label class="field-label">KPC 이름</label>
           <input type="text" id="scriptKpcName" placeholder="KPC 이름 입력">
@@ -1520,6 +1754,13 @@ function renderScriptIntakeView(){
           <label class="field-label">PC / 탐사자 이름</label>
           <input type="text" id="scriptPcName" placeholder="PC 이름 입력">
         </div>
+      </div>
+
+      <div id="panelMulti" class="multi-grid hidden">
+        <div><label class="field-label">HO1</label><input type="text" id="scriptHo1" placeholder="이름"></div>
+        <div><label class="field-label">HO2</label><input type="text" id="scriptHo2" placeholder="이름"></div>
+        <div><label class="field-label">HO3</label><input type="text" id="scriptHo3" placeholder="이름"></div>
+        <div><label class="field-label">HO4</label><input type="text" id="scriptHo4" placeholder="이름"></div>
       </div>
 
       <div class="upload-row">
@@ -1532,21 +1773,34 @@ function renderScriptIntakeView(){
 
       <label class="field-label">스크립트 원고</label>
       <textarea id="scriptRawInput" class="field-gap" placeholder="텍스트를 이곳에 붙여넣거나 위에서 PDF를 업로드해주세요.
-원고에 'KPC', 'PC', '탐사자'라고 써두면 위 이름으로 자동 치환되고 조사도 맞춰집니다.
-'핸드아웃'이나 'KP'라는 단어가 들어간 줄은 통째로 하나의 블록으로 묶여요."></textarea>
+타이만 모드: 원고에 'KPC', 'PC', '탐사자'라고 써두면 위 이름으로 자동 치환됩니다.
+다인 모드: 'HO1'~'HO4', 'PC1'~'PC4' 등으로 써두면 각 슬롯 이름으로 치환됩니다.
+'핸드아웃'/'KP'/'판정'이 들어간 줄은 통째로 하나의 블록으로 묶여요."></textarea>
 
       <div class="opt-row">
         <label class="opt-check"><input type="checkbox" id="scriptCommaSplit"> 쉼표 단위 문장 분리</label>
         <label class="opt-check"><input type="checkbox" id="scriptPdfRepair" checked> PDF 줄바꿈 보정</label>
+        <label class="opt-check"><input type="checkbox" id="scriptDescMode"> /desc 접두사 추가</label>
+        <label class="opt-check"><input type="checkbox" id="scriptJpTranslate"> 일본어 번역</label>
+        <label class="opt-check"><input type="checkbox" id="scriptExtractLink"> 세션 링크 별도 추출</label>
+        <label class="opt-check"><input type="checkbox" id="scriptCalcStats" checked> 실시간 세션 인포계산</label>
       </div>
-      <div class="hint" style="margin:-10px 0 16px;">PDF를 파일로 업로드하면 자동으로 문단이 정리돼요. 이 옵션은 텍스트를 직접 복사해서 붙여넣었을 때(줄바꿈이 뒤섞여 들어올 때) 보조로 씁니다.</div>
+      <div class="hint" style="margin:-10px 0 16px;">PDF를 파일로 업로드하면 자동으로 문단이 정리돼요. "PDF 줄바꿈 보정"은 텍스트를 직접 복사해서 붙여넣었을 때 보조로 씁니다. /desc는 코코포리아 등에서 지문을 구분해서 보여주는 명령어예요.</div>
 
       <div class="btn-row">
         <button class="ghost-btn" onclick="renderScriptIntakeView()">초기화</button>
-        <button class="primary-btn" onclick="runScriptConversion()">스크립트 변환 및 실행</button>
+        <button class="primary-btn" id="scriptRunBtn" onclick="runScriptConversion()">스크립트 변환 및 실행</button>
       </div>
     </div>
   `;
+}
+
+function switchScriptMode(mode){
+  scriptMode = mode;
+  document.getElementById('tabTyeman').classList.toggle('active', mode === 'tyeman');
+  document.getElementById('tabMulti').classList.toggle('active', mode === 'multi');
+  document.getElementById('panelTyeman').classList.toggle('hidden', mode !== 'tyeman');
+  document.getElementById('panelMulti').classList.toggle('hidden', mode !== 'multi');
 }
 
 async function handleScriptPdfUpload(e){
@@ -1569,56 +1823,203 @@ async function handleScriptPdfUpload(e){
   }
 }
 
-function runScriptConversion(){
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+// 비공식 구글 번역 엔드포인트로 일본어→한국어 청크 번역 (실패 시 원문 유지)
+async function translateTextChunk(text){
+  if (!text.trim()) return text;
+  try {
+    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=ja&tl=ko&dt=t&q=${encodeURIComponent(text)}`;
+    const res = await fetch(url);
+    const data = await res.json();
+    if (data && data[0]){
+      let out = '';
+      data[0].forEach(part => { if (part[0]) out += part[0]; });
+      return out;
+    }
+    return text;
+  } catch (e){
+    console.error('번역 실패', e);
+    return text;
+  }
+}
+
+async function translateBlocksToKorean(blocks, onProgress){
+  const SAFE_LIMIT = 500;
+  const SEPARATOR = ' ▣ ';
+  let i = 0;
+  let failCount = 0;
+  while (i < blocks.length){
+    let chunkText = '';
+    const idxs = [];
+    if (onProgress) onProgress(i, blocks.length);
+    while (i < blocks.length){
+      const t = blocks[i].text;
+      if (chunkText.length + t.length + SEPARATOR.length > SAFE_LIMIT && chunkText.length > 0) break;
+      chunkText += (chunkText ? SEPARATOR : '') + t;
+      idxs.push(i);
+      i++;
+    }
+    if (chunkText.trim()){
+      const translated = await translateTextChunk(chunkText);
+      const parts = translated.split(/▣/g).map(s => s.trim());
+      if (parts.length === idxs.length){
+        idxs.forEach((origIdx, subIdx) => { if (parts[subIdx]) blocks[origIdx].text = parts[subIdx]; });
+      } else {
+        for (const idx of idxs){
+          blocks[idx].text = await translateTextChunk(blocks[idx].text);
+          await sleep(20);
+          failCount++;
+        }
+      }
+      await sleep(50);
+    }
+  }
+  return failCount;
+}
+
+function extractLinksFromBlocks(blocks){
+  const urlRegex = /(https?:\/\/[^\s]+)/g;
+  const links = [];
+  blocks.forEach(b => {
+    const found = b.text.match(urlRegex);
+    if (found) found.forEach(l => { if (!links.includes(l)) links.push(l); });
+  });
+  return links;
+}
+
+function computeScriptStats(blocks){
+  const charCount = blocks.reduce((sum, b) => sum + (b.text ? b.text.length : 0), 0);
+  const estMinutes = Math.ceil(charCount / 220) * 2;
+  return { charCount, estMinutes };
+}
+
+async function runScriptConversion(){
   const title = document.getElementById('scriptTitleInput').value.trim();
-  const kpcName = document.getElementById('scriptKpcName').value.trim();
-  const pcName = document.getElementById('scriptPcName').value.trim();
   const rawText = document.getElementById('scriptRawInput').value;
   const commaSplit = document.getElementById('scriptCommaSplit').checked;
   const pdfRepair = document.getElementById('scriptPdfRepair').checked;
+  const descMode = document.getElementById('scriptDescMode').checked;
+  const jpTranslate = document.getElementById('scriptJpTranslate').checked;
+  const extractLink = document.getElementById('scriptExtractLink').checked;
+  const calcStats = document.getElementById('scriptCalcStats').checked;
 
   if (!rawText.trim()){
     showToast('스크립트 원고를 입력해주세요');
     return;
   }
 
-  const blocks = convertScript(rawText, kpcName, pcName, commaSplit, pdfRepair);
+  let names;
+  if (scriptMode === 'multi'){
+    names = {
+      mode: 'multi',
+      ho1: document.getElementById('scriptHo1').value.trim(),
+      ho2: document.getElementById('scriptHo2').value.trim(),
+      ho3: document.getElementById('scriptHo3').value.trim(),
+      ho4: document.getElementById('scriptHo4').value.trim()
+    };
+  } else {
+    names = { mode: 'tyeman', kpc: document.getElementById('scriptKpcName').value.trim(), pc: document.getElementById('scriptPcName').value.trim() };
+  }
+
+  const runBtn = document.getElementById('scriptRunBtn');
+  runBtn.disabled = true;
+  runBtn.textContent = '변환 중...';
+
+  const blocks = convertScript(rawText, names, commaSplit, pdfRepair, descMode);
+
+  let translateFailCount = 0;
+  if (jpTranslate){
+    translateFailCount = await translateBlocksToKorean(blocks, (i, total) => {
+      runBtn.textContent = `번역 중... (${i}/${total})`;
+    });
+  }
+
+  const links = extractLink ? extractLinksFromBlocks(blocks) : [];
+  const stats = calcStats ? computeScriptStats(blocks) : null;
+
+  const defaultTitle = names.mode === 'multi' ? '다인 스크립트' : `${names.kpc || 'KPC'} 스크립트`;
   const record = {
     id: uid(),
     type: 'script',
-    title: title || `${kpcName || 'KPC'} 스크립트`,
-    kpcName, pcName, commaSplit, pdfRepair,
+    title: title || defaultTitle,
+    names, commaSplit, pdfRepair, descMode, jpTranslate, extractLink, calcStats,
+    translateFailCount,
     createdAt: Date.now(),
-    blocks
+    blocks, links, stats
   };
-  dbPut(record).then(() => {
-    currentDoc = record;
-    renderScriptResultView(record);
-    refreshHistory();
-  });
+  await dbPut(record);
+  currentDoc = record;
+  renderScriptResultView(record);
+  await refreshHistory();
 }
 
 /* ============================================================
    뷰: 스크립트 정리 결과 화면
 ============================================================ */
+let scriptPlayModeActive = false;
+let scriptPlayIndex = 0;
+let scriptPlayableBlocks = [];
+
+function scriptNamesSummary(record){
+  const n = record.names;
+  if (!n) return '';
+  if (n.mode === 'multi'){
+    const parts = [n.ho1, n.ho2, n.ho3, n.ho4].filter(Boolean);
+    return parts.length ? `다인 · ${parts.join(' / ')}` : '다인 모드';
+  }
+  return `KPC: ${n.kpc || '-'} · PC: ${n.pc || '-'}`;
+}
+
 function renderScriptResultView(record){
   const content = document.getElementById('content');
   const blocksHtml = (record.blocks || []).map((b, idx) => scriptBlockHtml(b, idx)).join('')
     || '<div class="script-empty">블록이 없습니다</div>';
 
+  const statsHtml = record.stats ? `
+    <div class="stats-row">
+      <div class="stats-pill">총 글자 수: ${record.stats.charCount.toLocaleString()}자</div>
+      <div class="stats-pill">예상 세션 시간: 약 ${record.stats.estMinutes}분</div>
+    </div>` : '';
+
+  const warnHtml = (record.jpTranslate && record.translateFailCount > 0) ? `
+    <div class="trigger-item" style="margin-bottom:14px;">⚠ 번역 요청 중 ${record.translateFailCount}건이 실패해 원문(일본어)이 남아있을 수 있어요. 확인해주세요.</div>` : '';
+
+  const linksHtml = (record.links && record.links.length) ? `
+    <div class="link-card">
+      <div class="link-card-head">
+        <div class="field-label">세션 링크 모음 (BGM / 자료)</div>
+        <button class="ghost-btn" onclick="copyAllScriptLinks()">전체 복사</button>
+      </div>
+      ${record.links.map(l => `
+        <div class="link-row">
+          <a href="${escapeHtml(l)}" target="_blank" rel="noopener">${escapeHtml(l)}</a>
+          <button class="ghost-btn" onclick="copySingleText('${escapeHtml(l).replace(/'/g,"\\'")}')">복사</button>
+        </div>
+      `).join('')}
+    </div>` : '';
+
   content.innerHTML = `
     <div class="script-header">
       <div>
         <div class="script-title">${escapeHtml(record.title)}</div>
-        <div class="script-sub">KPC: ${escapeHtml(record.kpcName||'-')} · PC: ${escapeHtml(record.pcName||'-')}</div>
+        <div class="script-sub">${escapeHtml(scriptNamesSummary(record))}</div>
       </div>
       <div class="result-actions">
+        <button class="ghost-btn" id="scriptPlayModeBtn" onclick="toggleScriptPlayMode()">▶ 진행 모드</button>
         <button class="ghost-btn" onclick="copyScriptAsText()">전체 복사</button>
         <button class="ghost-btn" onclick="startNewScript()">새 스크립트</button>
       </div>
     </div>
+    ${statsHtml}
+    ${warnHtml}
+    ${linksHtml}
     <div class="block-list" id="blockList">${blocksHtml}</div>
   `;
+
+  scriptPlayModeActive = false;
+  scriptPlayIndex = 0;
+  refreshScriptPlayableBlocks();
 }
 
 const BLOCK_TYPE_LABELS = {
@@ -1633,13 +2034,13 @@ function scriptBlockHtml(block, idx){
     .map(([val, label]) => `<option value="${val}" ${block.type === val ? 'selected' : ''}>${label}</option>`)
     .join('');
   return `
-    <div class="script-block type-${block.type}" data-idx="${idx}">
+    <div class="script-block playable type-${block.type}" data-idx="${idx}" onclick="handleScriptBlockClick(${idx}, this)">
       ${speakerHtml}
       <div class="block-text" id="blockText_${idx}">${escapeHtml(block.text)}</div>
       <div class="block-actions">
-        <span onclick="editBlock(${idx})">수정</span>
-        <span class="del-action" onclick="deleteBlock(${idx})">삭제</span>
-        <select class="block-type-select" onchange="changeBlockType(${idx}, this.value)">${options}</select>
+        <span onclick="event.stopPropagation(); editBlock(${idx})">수정</span>
+        <span class="del-action" onclick="event.stopPropagation(); deleteBlock(${idx})">삭제</span>
+        <select class="block-type-select" onclick="event.stopPropagation()" onchange="changeBlockType(${idx}, this.value)">${options}</select>
       </div>
     </div>
   `;
@@ -1664,6 +2065,10 @@ function editBlock(idx){
     if (currentDoc && currentDoc.blocks){
       currentDoc.blocks[idx].text = el.textContent;
       dbPut(currentDoc);
+      if (currentDoc.stats){
+        currentDoc.stats = computeScriptStats(currentDoc.blocks);
+        dbPut(currentDoc);
+      }
     }
   }
 }
@@ -1671,6 +2076,7 @@ function editBlock(idx){
 function deleteBlock(idx){
   if (!currentDoc || !currentDoc.blocks) return;
   currentDoc.blocks.splice(idx, 1);
+  if (currentDoc.stats) currentDoc.stats = computeScriptStats(currentDoc.blocks);
   dbPut(currentDoc).then(() => renderScriptResultView(currentDoc));
 }
 
@@ -1678,6 +2084,79 @@ function copyScriptAsText(){
   if (!currentDoc || !currentDoc.blocks) return;
   const out = currentDoc.blocks.map(b => b.text).join('\n\n');
   navigator.clipboard.writeText(out).then(() => showToast('클립보드에 복사되었습니다'));
+}
+
+function copySingleText(text){
+  navigator.clipboard.writeText(text).then(() => showToast('복사되었습니다'));
+}
+
+function copyAllScriptLinks(){
+  if (!currentDoc || !currentDoc.links) return;
+  navigator.clipboard.writeText(currentDoc.links.join('\n')).then(() => showToast('링크 전체 복사 완료'));
+}
+
+/* ============================================================
+   스크립트 정리 — 진행 모드 (클릭 시 복사 + 다음 줄로 자동 이동)
+============================================================ */
+function refreshScriptPlayableBlocks(){
+  scriptPlayableBlocks = Array.from(document.querySelectorAll('.script-block.playable'));
+  if (scriptPlayIndex >= scriptPlayableBlocks.length) scriptPlayIndex = Math.max(0, scriptPlayableBlocks.length - 1);
+}
+
+function highlightCurrentScriptPlayBlock(){
+  scriptPlayableBlocks.forEach(b => b.classList.remove('play-current'));
+  const cur = scriptPlayableBlocks[scriptPlayIndex];
+  if (cur){
+    cur.classList.add('play-current');
+    cur.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+}
+
+function toggleScriptPlayMode(){
+  scriptPlayModeActive = !scriptPlayModeActive;
+  const btn = document.getElementById('scriptPlayModeBtn');
+  const floatBtn = document.getElementById('floatingNextBtn');
+  if (btn) btn.textContent = scriptPlayModeActive ? '■ 진행 모드 종료' : '▶ 진행 모드';
+  if (scriptPlayModeActive){
+    scriptPlayIndex = 0;
+    refreshScriptPlayableBlocks();
+    highlightCurrentScriptPlayBlock();
+    if (!floatBtn){
+      const btnEl = document.createElement('button');
+      btnEl.id = 'floatingNextBtn';
+      btnEl.textContent = '다음 줄 복사 ▶';
+      btnEl.onclick = advanceScriptPlayMode;
+      document.body.appendChild(btnEl);
+    }
+  } else {
+    scriptPlayableBlocks.forEach(b => b.classList.remove('play-current'));
+    if (floatBtn) floatBtn.remove();
+  }
+}
+
+function advanceScriptPlayMode(){
+  if (!scriptPlayableBlocks.length) return;
+  const cur = scriptPlayableBlocks[scriptPlayIndex];
+  if (!cur) return;
+  copySingleText(cur.querySelector('.block-text').innerText);
+  if (scriptPlayIndex < scriptPlayableBlocks.length - 1){
+    scriptPlayIndex++;
+    highlightCurrentScriptPlayBlock();
+  } else {
+    showToast('마지막 줄입니다');
+  }
+}
+
+function handleScriptBlockClick(idx, el){
+  if (el.querySelector('.block-text').getAttribute('contenteditable') === 'true') return;
+  copySingleText(el.querySelector('.block-text').innerText);
+  if (scriptPlayModeActive){
+    const pos = scriptPlayableBlocks.indexOf(el);
+    if (pos !== -1){
+      scriptPlayIndex = Math.min(pos + 1, scriptPlayableBlocks.length - 1);
+      highlightCurrentScriptPlayBlock();
+    }
+  }
 }
 </script>
 </body>
