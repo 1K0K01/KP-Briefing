@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>키퍼 브리핑</title>
+<title>키퍼 브리핑 — CoC 마스터링 어시스턴트</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/pretendard/dist/web/static/pretendard.css">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+KR:wght@500;700&display=swap" rel="stylesheet">
@@ -513,11 +513,6 @@ textarea.prompt-area{ min-height:180px; font-size:13px; }
     <textarea id="systemPromptInput" class="prompt-area field-gap"></textarea>
     <button class="ghost-btn" onclick="resetSystemPrompt()">기본값으로 되돌리기</button>
 
-    <div class="modal-section-label">✂️ 스크립트 정리 — 제목 마커</div>
-    <div class="hint" style="margin:0 0 8px;">PDF 줄바꿈 보정 시, 아래 문자로 시작하는 줄은 항상 독립된 블록(제목·구간 표시)으로 분리됩니다. 한 줄에 하나씩 입력하세요. 숫자로 시작하는 제목(예: "1.", "2ND.")은 항상 자동 인식되니 따로 추가하지 않아도 됩니다.</div>
-    <textarea id="scriptMarkersInput" class="prompt-area field-gap" style="min-height:110px;"></textarea>
-    <button class="ghost-btn" onclick="resetScriptMarkers()">기본값으로 되돌리기</button>
-
     <div class="modal-actions">
       <button class="ghost-btn" onclick="closeSettings()">닫기</button>
       <button class="primary-btn" onclick="saveSettings()">저장</button>
@@ -821,7 +816,6 @@ function openSettings(){
   document.getElementById('settingsProviderSelect').value = localStorage.getItem('kb_active_provider') || 'anthropic';
   renderProviderFields();
   document.getElementById('systemPromptInput').value = localStorage.getItem('kb_system_prompt') || DEFAULT_SYSTEM_PROMPT;
-  document.getElementById('scriptMarkersInput').value = loadScriptMarkers();
   document.getElementById('testResult').textContent = '';
   document.getElementById('settingsModal').classList.remove('hidden');
 }
@@ -876,7 +870,6 @@ function saveSettings(){
   collectCurrentProviderFieldsIntoState();
   saveProviders(providersState);
   localStorage.setItem('kb_system_prompt', document.getElementById('systemPromptInput').value);
-  localStorage.setItem('kb_script_markers', document.getElementById('scriptMarkersInput').value);
   closeSettings();
   showToast('설정이 저장되었습니다');
   // 시나리오 분석 화면(공급자 알약)만 새로고침 — 스크립트 정리 중이던 원고는 보존
@@ -885,10 +878,6 @@ function saveSettings(){
 
 function resetSystemPrompt(){
   document.getElementById('systemPromptInput').value = DEFAULT_SYSTEM_PROMPT;
-}
-
-function resetScriptMarkers(){
-  document.getElementById('scriptMarkersInput').value = DEFAULT_SCRIPT_MARKERS;
 }
 
 async function handleTestConnection(){
@@ -1471,28 +1460,15 @@ function substituteMultiNames(text, names){
 /* ============================================================
    스크립트 정리 — PDF 줄바꿈 보정
 ============================================================ */
-const DEFAULT_SCRIPT_MARKERS = "■\nŸ\nü\n▶\n◆\n◇\n●\n○\n※\n✷\nv \nQ.\nA.";
 // 이 패턴으로 "시작"하는 줄은 공백 없이 앞 문단에 접합 (한글 문장 어미/조사 계열 — 단어 중간 줄바꿈 복원용)
 const GLUE_NO_SPACE_RE = /^(니다|습니다|ㅂ니다|니까|습니까|는데요|던데요|의)(?=[\s.!?,)"'’”]|$)/;
 
 function escapeRegExp(s){ return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 
-function loadScriptMarkers(){
-  return localStorage.getItem('kb_script_markers') || DEFAULT_SCRIPT_MARKERS;
-}
-
-function buildHeadingRegex(markersText){
-  const generic = '(?:[0-9]+-[0-9]+\\s*\\.|[0-9]+\\s*\\.|[0-9]+\\s*(?:ST|ND|RD|TH)\\s*\\.)';
-  const custom = (markersText || '')
-    .split('\n').map(s => s.trim()).filter(Boolean).map(escapeRegExp);
-  return new RegExp('^(' + [generic, ...custom].join('|') + ')');
-}
-
 // KP/핸드아웃/링크류 줄은 문단 병합 대상에서 미리 빼둔다 (문장부호 없이 끝나도 다음 줄에 안 붙게)
 const SPECIAL_LINE_RE = /키퍼|KP|kp|핸드아웃|비밀번호|Handout|http|bgm|브금/i;
 
-function repairPdfLineWraps(text, markersText){
-  const HEADING_RE = buildHeadingRegex(markersText);
+function repairPdfLineWraps(text){
   const cleaned = text.replace(/\f/g, '\n'); // 페이지 나눔 문자 제거
   const lines = cleaned.replace(/\r\n/g, '\n').split('\n');
   const paragraphs = [];
@@ -1504,7 +1480,7 @@ function repairPdfLineWraps(text, markersText){
       if (buffer){ paragraphs.push(buffer); buffer = ''; }
       continue;
     }
-    if (HEADING_RE.test(line) || SPECIAL_LINE_RE.test(line)){
+    if (SPECIAL_LINE_RE.test(line)){
       if (buffer){ paragraphs.push(buffer); buffer = ''; }
       paragraphs.push(line);
       continue;
@@ -1635,17 +1611,8 @@ function matchDialogue(p){
   if (/^[“"]/.test(t)) return { speaker: null };
   return null;
 }
-// 마커+짧은 제목이 본문과 한 줄에 붙어 나오는 경우, 제목만 잘라낸다 (예: "▶ 단상 사역자들이...")
-function splitHeadingPrefix(p, HEADING_RE){
-  if (!HEADING_RE.test(p)) return null;
-  const PREFIX_RE = /^([■Ÿü▶◆◇●○※✷]\s*(?:[0-9]+(?:-[0-9]+)?\s*\.)?\s*|[0-9]+(?:-[0-9]+)?\s*\.\s*)([가-힣A-Za-z0-9:·][가-힣A-Za-z0-9:·]{0,9})(?=\s|$)/;
-  const m = p.match(PREFIX_RE);
-  if (!m) return { heading: p.trim(), rest: '' };
-  return { heading: (m[1] + m[2]).trim(), rest: p.slice(m[0].length).trim() };
-}
 
 function classifyParagraphs(paragraphs, commaSplit){
-  const HEADING_RE = buildHeadingRegex(loadScriptMarkers());
   const blocks = [];
   let pending = null; // 직전 줄이 '판정'/'Annot' 라벨이었는지 여부
 
@@ -1656,15 +1623,6 @@ function classifyParagraphs(paragraphs, commaSplit){
     if (handoutIdx !== -1 || kpIdx !== -1){
       const isKpFirst = kpIdx !== -1 && (handoutIdx === -1 || kpIdx < handoutIdx);
       blocks.push({ text: p, type: isKpFirst ? 'kp' : 'handout' });
-      pending = null; return;
-    }
-
-    if (HEADING_RE.test(p)){
-      const split = splitHeadingPrefix(p, HEADING_RE);
-      blocks.push({ text: split.heading, type: 'heading' });
-      if (split.rest){
-        splitIntoSentences(split.rest, commaSplit).forEach(s => blocks.push({ text: s, type: classifyBlock(s) }));
-      }
       pending = null; return;
     }
 
@@ -1714,7 +1672,7 @@ function applyDescPrefix(blocks, descMode){
 
 function convertScript(rawText, names, commaSplit, pdfRepair, descMode){
   const paragraphs = pdfRepair
-    ? repairPdfLineWraps(rawText, loadScriptMarkers())
+    ? repairPdfLineWraps(rawText)
     : rawText.replace(/\r\n/g, '\n').split('\n').map(p => p.trim()).filter(Boolean);
   const substituted = paragraphs.map(p => {
     let out = names.mode === 'multi' ? substituteMultiNames(p, names) : substituteNames(p, names.kpc, names.pc);
