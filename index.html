@@ -498,6 +498,7 @@ textarea.prompt-area{ min-height:180px; font-size:13px; }
       <option value="openai">OpenAI</option>
       <option value="anthropic">Anthropic Claude</option>
       <option value="deepseek">DeepSeek</option>
+      <option value="neuralwatt">NeuralWatt</option>
       <option value="custom">커스텀 (Custom)</option>
     </select>
 
@@ -550,6 +551,7 @@ const PROVIDER_LABELS = {
   openai: 'OpenAI',
   anthropic: 'Anthropic Claude',
   deepseek: 'DeepSeek',
+  neuralwatt: 'NeuralWatt',
   custom: '커스텀'
 };
 
@@ -558,8 +560,11 @@ const PROVIDER_DEFAULT_MODEL = {
   openai: 'gpt-4o',
   anthropic: 'claude-sonnet-5',
   deepseek: 'deepseek-chat',
+  neuralwatt: 'glm-5.2',
   custom: ''
 };
+
+const NEURALWATT_ENDPOINT = 'https://api.neuralwatt.com/v1/chat/completions';
 
 // 히스토리/결과 화면에 쓸 "공급자 · 모델명" 표시 문자열
 function formatProviderTag(record){
@@ -595,20 +600,25 @@ const DEFAULT_SYSTEM_PROMPT = `당신은 크툴루의 부름(Call of Cthulhu) 7�
 ## 종합 마스터링 조언`;
 
 function loadProviders(){
-  try {
-    const raw = localStorage.getItem('kb_providers');
-    if (raw) return JSON.parse(raw);
-  } catch(e){}
-  // 구버전 키 마이그레이션
-  const legacyKey = localStorage.getItem('kb_api_key');
-  const legacyModel = localStorage.getItem('kb_model');
   const base = {
     gemini: { apiKey:'', model: PROVIDER_DEFAULT_MODEL.gemini },
     openai: { apiKey:'', model: PROVIDER_DEFAULT_MODEL.openai },
     anthropic: { apiKey:'', model: PROVIDER_DEFAULT_MODEL.anthropic },
     deepseek: { apiKey:'', model: PROVIDER_DEFAULT_MODEL.deepseek },
+    neuralwatt: { apiKey:'', model: PROVIDER_DEFAULT_MODEL.neuralwatt },
     custom: { apiKey:'', model:'', endpoint:'' }
   };
+  try {
+    const raw = localStorage.getItem('kb_providers');
+    if (raw){
+      const saved = JSON.parse(raw);
+      // 기존에 저장된 값 위에, 새로 추가된 공급자 슬롯(예: neuralwatt)이 없으면 기본값으로 채워준다
+      return Object.assign(base, saved);
+    }
+  } catch(e){}
+  // 구버전 키 마이그레이션
+  const legacyKey = localStorage.getItem('kb_api_key');
+  const legacyModel = localStorage.getItem('kb_model');
   if (legacyKey){
     base.anthropic.apiKey = legacyKey;
     base.anthropic.model = legacyModel || PROVIDER_DEFAULT_MODEL.anthropic;
@@ -1183,6 +1193,8 @@ async function callAI(provider, cfg, systemPrompt, userText, signal){
       return callOpenAICompatible(cfg.apiKey, 'https://api.openai.com/v1/chat/completions', cfg.model || PROVIDER_DEFAULT_MODEL.openai, systemPrompt, userMsg, signal);
     case 'deepseek':
       return callOpenAICompatible(cfg.apiKey, 'https://api.deepseek.com/chat/completions', cfg.model || PROVIDER_DEFAULT_MODEL.deepseek, systemPrompt, userMsg, signal);
+    case 'neuralwatt':
+      return callOpenAICompatible(cfg.apiKey, NEURALWATT_ENDPOINT, cfg.model || PROVIDER_DEFAULT_MODEL.neuralwatt, systemPrompt, userMsg, signal);
     case 'custom':
       if (!cfg.endpoint) throw new Error('커스텀 엔드포인트 URL을 설정해주세요');
       return callOpenAICompatible(cfg.apiKey, cfg.endpoint, cfg.model, systemPrompt, userMsg, signal);
